@@ -22,6 +22,20 @@ class PromptEvolutionProofTests(unittest.TestCase):
         self.assertEqual(8, len(validation_repositories))
         self.assertEqual(2, len(holdout_repositories))
         self.assertFalse(validation_repositories & holdout_repositories)
+        self.assertEqual(
+            32,
+            sum(
+                len(case["expected_findings"])
+                for case in cases if case["split"] == "validation"
+            ),
+        )
+        self.assertEqual(
+            8,
+            sum(
+                len(case["expected_findings"])
+                for case in cases if case["split"] == "holdout"
+            ),
+        )
 
         with tempfile.TemporaryDirectory() as directory:
             dataset_path = os.path.join(directory, "cases.jsonl")

@@ -3,7 +3,12 @@ import tempfile
 import unittest
 
 from evoagent.evaluation_experiments import load_controlled_pr_cases
+from evoagent.evaluation_fixtures import (
+    generate_controlled_cases,
+    generate_prompt_evolution_cases,
+)
 from evoagent.evolution import RegressionEvaluator
+from evoagent.evolution_proof import load_prompt_evolution_cases
 from evoagent.evaluation_harness import (
     dataset_fingerprint,
     load_jsonl,
@@ -13,6 +18,13 @@ from evoagent.models import Finding, Severity
 
 
 class EndToEndEvaluationTests(unittest.TestCase):
+    def test_generated_cases_match_checked_in_corpora(self):
+        self.assertEqual(generate_controlled_cases(), load_controlled_pr_cases())
+        self.assertEqual(
+            generate_prompt_evolution_cases(),
+            load_prompt_evolution_cases(),
+        )
+
     def test_generated_dataset_has_repository_level_split_and_expected_counts(self):
         cases = load_controlled_pr_cases()
         self.assertEqual(100, len(cases))
