@@ -2,8 +2,9 @@ import hashlib
 import json
 import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 
 from .models import ReviewReport, TaskState, TraceEvent
 
@@ -23,8 +24,17 @@ class TaskStore:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        conn = self._connect()
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def _init(self) -> None:
-        with self._connect() as conn:
+        with self._connection() as conn:
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
@@ -314,7 +324,7 @@ class TaskStore:
         payload: Dict[str, Any], tenant_id: str = "default",
     ) -> None:
         now = utc_now()
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO tasks(id,state,repository,pull_request,input_json,report_json,error,"
                 "created_at,updated_at,tenant_id,cancel_requested) "
@@ -324,7 +334,7 @@ class TaskStore:
             )
 
     def transition(self, task_id: str, event: TraceEvent) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?",
                 (event.state.value, event.created_at, task_id),
@@ -335,7 +345,7 @@ class TaskStore:
             )
 
     def succeed(self, task_id: str, report: ReviewReport, event: TraceEvent) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "UPDATE tasks SET state = ?, report_json = ?, updated_at = ? WHERE id = ?",
                 (TaskState.SUCCESS.value, json.dumps(report.to_dict(), ensure_ascii=False), event.created_at, task_id),
@@ -346,7 +356,7 @@ class TaskStore:
             )
 
     def fail(self, task_id: str, error: str, event: TraceEvent) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "UPDATE tasks SET state = ?, error = ?, updated_at = ? WHERE id = ?",
                 (TaskState.FAILED.value, error[:2000], event.created_at, task_id),
@@ -357,7 +367,7 @@ class TaskStore:
             )
 
     def get(self, task_id: str, tenant_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             if tenant_id is None:
                 row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
             else:
@@ -386,7 +396,7 @@ class TaskStore:
         return value
 
     def record_agent_message(self, task_id: str, message: Dict[str, Any]) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO agent_messages(task_id,sender,recipient,kind,correlation_id,"
                 "content_json,created_at) VALUES (?,?,?,?,?,?,?)",
@@ -396,7 +406,7 @@ class TaskStore:
             )
 
     def save_agent_memory(self, memory: Dict[str, Any]) -> Dict[str, Any]:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO agent_memories(id,tenant_id,repository,task_id,agent,scope,kind,"
                 "content,keywords_json,metadata_json,importance,created_at,expires_at) "
@@ -424,7 +434,7 @@ class TaskStore:
     ) -> list:
         placeholders = ",".join("?" for _ in scopes)
         params = [tenant_id, repository, *scopes, utc_now(), max(1, min(limit, 500))]
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM agent_memories WHERE tenant_id=? AND repository=? "
                 "AND scope IN (%s) AND (expires_at IS NULL OR expires_at>?) "
@@ -444,14 +454,14 @@ class TaskStore:
             params.append(scope)
         if not clauses:
             raise ValueError("memory deletion requires task_id or scope")
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             cursor = conn.execute(
                 "DELETE FROM agent_memories WHERE " + " AND ".join(clauses), params
             )
             return cursor.rowcount
 
     def purge_expired_agent_memories(self) -> int:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             cursor = conn.execute(
                 "DELETE FROM agent_memories WHERE expires_at IS NOT NULL AND expires_at<=?",
                 (utc_now(),),
@@ -466,7 +476,7 @@ class TaskStore:
         return value
 
     def list_tasks(self, limit: int = 50, tenant_id: Optional[str] = None) -> list:
-        with self._connect() as conn:
+        with self._connection() as conn:
             if tenant_id is None:
                 rows = conn.execute(
                     "SELECT id,state,repository,pull_request,error,created_at,updated_at,tenant_id "
@@ -481,7 +491,7 @@ class TaskStore:
         return [dict(item) for item in rows]
 
     def record_failure_case(self, task_id: str, category: str, payload: Dict[str, Any]) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO failure_cases(task_id, category, payload_json, created_at) VALUES (?, ?, ?, ?)",
                 (task_id, category, json.dumps(payload, ensure_ascii=False), utc_now()),
@@ -504,7 +514,7 @@ class TaskStore:
             query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY f.id DESC LIMIT ?"
         params.append(max(1, min(limit, 500)))
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
         values = []
         for row in rows:
@@ -526,7 +536,7 @@ class TaskStore:
             query += " WHERE f.task_id=?"
             params.append(task_id)
         query += " ORDER BY f.id DESC"
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
         values = []
         for row in rows:
@@ -540,7 +550,7 @@ class TaskStore:
         if not ids:
             return
         placeholders = ",".join("?" for _ in ids)
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "UPDATE failure_cases SET resolved = 1 WHERE id IN (%s)" % placeholders,
                 ids,
@@ -551,7 +561,7 @@ class TaskStore:
         source: str = "manual", active: bool = True,
     ) -> Dict[str, Any]:
         expected_json = json.dumps(expected, ensure_ascii=False)
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             existing = conn.execute(
                 "SELECT * FROM evaluation_cases WHERE name = ?", (name,)
             ).fetchone()
@@ -594,7 +604,7 @@ class TaskStore:
             query += " WHERE " + " AND ".join(clauses)
         query += " ORDER BY id LIMIT ?"
         params.append(max(1, min(limit, 500)))
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(query, params).fetchall()
         values = []
         for row in rows:
@@ -605,7 +615,7 @@ class TaskStore:
         return values
 
     def save_evolution_run(self, run: Dict[str, Any]) -> Dict[str, Any]:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO evolution_runs(id,skill_name,candidate_version,baseline_version,decision,"
                 "candidate_score,baseline_score,metrics_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -618,7 +628,7 @@ class TaskStore:
         return run
 
     def list_evolution_runs(self, limit: int = 50) -> list:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM evolution_runs ORDER BY created_at DESC LIMIT ?",
                 (max(1, min(limit, 200)),),
@@ -631,7 +641,7 @@ class TaskStore:
         return values
 
     def update_evolution_run(self, run_id: str, decision: str, metrics: Dict[str, Any]) -> bool:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             cursor = conn.execute(
                 "UPDATE evolution_runs SET decision = ?, metrics_json = ? WHERE id = ?",
                 (decision, json.dumps(metrics, ensure_ascii=False), run_id),
@@ -639,7 +649,7 @@ class TaskStore:
             return cursor.rowcount == 1
 
     def save_skill_version(self, skill_name: str, prompt: str, score: float, activate: bool = False) -> Dict[str, Any]:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(version), 0) AS version FROM skill_versions WHERE skill_name = ?", (skill_name,)
             ).fetchone()
@@ -655,7 +665,7 @@ class TaskStore:
         return {"skill_name": skill_name, "version": version, "score": score, "active": activate}
 
     def get_active_skill_version(self, skill_name: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT * FROM skill_versions WHERE skill_name = ? AND active = 1 ORDER BY version DESC LIMIT 1",
                 (skill_name,),
@@ -663,14 +673,14 @@ class TaskStore:
         return dict(row) if row else None
 
     def list_skill_versions(self, skill_name: str) -> list:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM skill_versions WHERE skill_name = ? ORDER BY version DESC", (skill_name,)
             ).fetchall()
         return [dict(item) for item in rows]
 
     def activate_skill_version(self, skill_name: str, version: int) -> bool:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             exists = conn.execute(
                 "SELECT 1 FROM skill_versions WHERE skill_name = ? AND version = ?", (skill_name, version)
             ).fetchone()
@@ -690,7 +700,7 @@ class TaskStore:
             artifact, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
         artifact_sha256 = hashlib.sha256(artifact_json.encode("utf-8")).hexdigest()
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(version),0) AS version FROM skill_artifact_versions "
                 "WHERE tenant_id=? AND skill_name=?", (tenant_id, skill_name),
@@ -728,7 +738,7 @@ class TaskStore:
     def get_active_skill_artifact(
         self, skill_name: str, tenant_id: str = "default",
     ) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT * FROM skill_artifact_versions WHERE tenant_id=? AND skill_name=? "
                 "AND active=1 ORDER BY version DESC LIMIT 1", (tenant_id, skill_name),
@@ -736,7 +746,7 @@ class TaskStore:
         return self._decode_skill_artifact(row) if row else None
 
     def list_active_skill_artifacts(self, tenant_id: str = "default") -> list:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM skill_artifact_versions WHERE tenant_id=? AND active=1 "
                 "ORDER BY skill_name", (tenant_id,)
@@ -746,7 +756,7 @@ class TaskStore:
     def list_skill_artifact_versions(
         self, skill_name: str, tenant_id: str = "default",
     ) -> list:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM skill_artifact_versions WHERE tenant_id=? AND skill_name=? "
                 "ORDER BY version DESC", (tenant_id, skill_name),
@@ -756,7 +766,7 @@ class TaskStore:
     def activate_skill_artifact(
         self, skill_name: str, version: int, tenant_id: str = "default",
     ) -> bool:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             exists = conn.execute(
                 "SELECT 1 FROM skill_artifact_versions v WHERE v.tenant_id=? "
                 "AND v.skill_name=? AND v.version=? AND (v.active=1 OR EXISTS ("
@@ -778,7 +788,7 @@ class TaskStore:
         return True
 
     def save_skill_evolution_run(self, run: Dict[str, Any]) -> Dict[str, Any]:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO skill_evolution_runs(id,tenant_id,skill_name,candidate_version,baseline_version,"
                 "decision,candidate_score,baseline_score,metrics_json,created_at) "
@@ -793,7 +803,7 @@ class TaskStore:
     def list_skill_evolution_runs(
         self, limit: int = 50, tenant_id: Optional[str] = None,
     ) -> list:
-        with self._connect() as conn:
+        with self._connection() as conn:
             if tenant_id is None:
                 rows = conn.execute(
                     "SELECT * FROM skill_evolution_runs ORDER BY created_at DESC LIMIT ?",
@@ -815,7 +825,7 @@ class TaskStore:
     def save_installation(
         self, installation_id: int, account_login: str, tenant_id: str = "default"
     ) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO installations"
                 "(installation_id,account_login,created_at,tenant_id) VALUES (?, ?, ?, ?)",
@@ -823,7 +833,7 @@ class TaskStore:
             )
 
     def installation_tenant(self, installation_id: int) -> Optional[str]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT tenant_id FROM installations WHERE installation_id=?", (installation_id,)
             ).fetchone()
@@ -833,7 +843,7 @@ class TaskStore:
         self, task_id: str, node: str, state: Dict[str, Any], status: str = "completed",
         attempt: int = 1, error: str = "",
     ) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO checkpoints(task_id,node,status,attempt,state_json,error,updated_at) "
                 "VALUES (?,?,?,?,?,?,?) ON CONFLICT(task_id,node) DO UPDATE SET "
@@ -844,7 +854,7 @@ class TaskStore:
             )
 
     def load_checkpoints(self, task_id: str) -> Dict[str, Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT node,status,attempt,state_json,error,updated_at FROM checkpoints "
                 "WHERE task_id=? ORDER BY updated_at", (task_id,)
@@ -857,14 +867,14 @@ class TaskStore:
         return result
 
     def save_task_payload(self, task_id: str, diff: str) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO task_payloads(task_id,diff,created_at) VALUES (?,?,?)",
                 (task_id, diff, utc_now()),
             )
 
     def update_task_input(self, task_id: str, updates: Dict[str, Any]) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             row = conn.execute(
                 "SELECT input_json FROM tasks WHERE id=?", (task_id,)
             ).fetchone()
@@ -878,7 +888,7 @@ class TaskStore:
             )
 
     def get_task_payload(self, task_id: str) -> Optional[str]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT diff FROM task_payloads WHERE task_id=?", (task_id,)
             ).fetchone()
@@ -890,17 +900,17 @@ class TaskStore:
         if tenant_id is not None:
             query += " AND tenant_id=?"
             params.append(tenant_id)
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             cursor = conn.execute(query, params)
             return cursor.rowcount > 0
 
     def is_cancelled(self, task_id: str) -> bool:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute("SELECT cancel_requested FROM tasks WHERE id=?", (task_id,)).fetchone()
         return bool(row and row["cancel_requested"])
 
     def cancel(self, task_id: str, event: TraceEvent) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "UPDATE tasks SET state=?,updated_at=? WHERE id=?",
                 (TaskState.CANCELLED.value, event.created_at, task_id),
@@ -915,7 +925,7 @@ class TaskStore:
     ) -> bool:
         if not delivery_id:
             raise ValueError("X-GitHub-Delivery is required")
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             try:
                 conn.execute(
                     "INSERT INTO webhook_deliveries"
@@ -933,14 +943,14 @@ class TaskStore:
                 return False
 
     def complete_webhook(self, delivery_id: str, task_id: Optional[str]) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "UPDATE webhook_deliveries SET task_id=? WHERE delivery_id=?",
                 (task_id, delivery_id),
             )
 
     def get_webhook(self, delivery_id: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT * FROM webhook_deliveries WHERE delivery_id=?", (delivery_id,)
             ).fetchone()
@@ -950,7 +960,7 @@ class TaskStore:
         self, user_id: str, username: str, password_hash: str,
         tenant_id: str, role: str,
     ) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO users(id,username,password_hash,created_at) VALUES (?,?,?,?)",
                 (user_id, username, password_hash, utc_now()),
@@ -963,7 +973,7 @@ class TaskStore:
             )
 
     def get_user(self, username: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT id,username,password_hash,active FROM users WHERE username=?", (username,)
             ).fetchone()
@@ -977,7 +987,7 @@ class TaskStore:
         return value
 
     def grant_repository(self, tenant_id: str, repository: str, auto_fix: bool = False) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO repository_grants(tenant_id,repository,auto_fix) VALUES (?,?,?) "
                 "ON CONFLICT(tenant_id,repository) DO UPDATE SET auto_fix=excluded.auto_fix",
@@ -987,7 +997,7 @@ class TaskStore:
     def repository_allowed(
         self, tenant_id: str, repository: str, require_auto_fix: bool = False,
     ) -> bool:
-        with self._connect() as conn:
+        with self._connection() as conn:
             total = conn.execute(
                 "SELECT COUNT(*) AS n FROM repository_grants WHERE tenant_id=?", (tenant_id,)
             ).fetchone()["n"]
@@ -1003,7 +1013,7 @@ class TaskStore:
         self, tenant_id: str, actor: str, action: str, resource: str,
         detail: Optional[Dict[str, Any]] = None,
     ) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO audit_log(tenant_id,actor,action,resource,detail_json,created_at) "
                 "VALUES (?,?,?,?,?,?)",
@@ -1012,7 +1022,7 @@ class TaskStore:
             )
 
     def list_audit(self, tenant_id: str, limit: int = 100) -> list:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT actor,action,resource,detail_json,created_at FROM audit_log "
                 "WHERE tenant_id=? ORDER BY id DESC LIMIT ?",
@@ -1026,7 +1036,7 @@ class TaskStore:
         return values
 
     def save_deployment(self, tenant_id: str, skill_name: str, config: Dict[str, Any]) -> None:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO deployments(tenant_id,skill_name,stable_version,candidate_version,"
                 "canary_percent,shadow_percent,max_error_rate,min_samples,status,samples,errors,updated_at) "
@@ -1048,7 +1058,7 @@ class TaskStore:
             )
 
     def get_deployment(self, tenant_id: str, skill_name: str) -> Optional[Dict[str, Any]]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT * FROM deployments WHERE tenant_id=? AND skill_name=?",
                 (tenant_id, skill_name),
@@ -1058,7 +1068,7 @@ class TaskStore:
     def record_deployment_result(
         self, tenant_id: str, skill_name: str, failed: bool,
     ) -> Optional[Dict[str, Any]]:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "UPDATE deployments SET samples=samples+1,errors=errors+?,updated_at=? "
                 "WHERE tenant_id=? AND skill_name=?",
@@ -1089,7 +1099,7 @@ class TaskStore:
         primary: Dict[str, Any], candidate: Optional[Dict[str, Any]],
         disagreement: float, candidate_failed: bool = False,
     ) -> Optional[Dict[str, Any]]:
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO release_observations(tenant_id,skill_name,task_id,lane,"
                 "primary_json,candidate_json,disagreement,candidate_failed,created_at) "
@@ -1136,7 +1146,7 @@ class TaskStore:
     def list_release_observations(
         self, tenant_id: str, skill_name: str, limit: int = 100,
     ) -> list:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM release_observations WHERE tenant_id=? AND skill_name=? "
                 "ORDER BY id DESC LIMIT ?",
@@ -1155,7 +1165,7 @@ class TaskStore:
         self, tenant_id: str, alert_key: str, severity: str, message: str,
     ) -> None:
         now = utc_now()
-        with self._lock, self._connect() as conn:
+        with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT OR IGNORE INTO alerts"
                 "(tenant_id,alert_key,severity,message,status,created_at,updated_at) "
@@ -1164,7 +1174,7 @@ class TaskStore:
             )
 
     def list_alerts(self, tenant_id: str, limit: int = 100) -> list:
-        with self._connect() as conn:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM alerts WHERE tenant_id=? ORDER BY id DESC LIMIT ?",
                 (tenant_id, max(1, min(limit, 500))),
@@ -1172,7 +1182,7 @@ class TaskStore:
         return [dict(row) for row in rows]
 
     def dashboard_stats(self, tenant_id: Optional[str] = None) -> Dict[str, Any]:
-        with self._connect() as conn:
+        with self._connection() as conn:
             clause = " WHERE tenant_id=?" if tenant_id is not None else ""
             params = (tenant_id,) if tenant_id is not None else ()
             total = conn.execute("SELECT COUNT(*) AS n FROM tasks" + clause, params).fetchone()["n"]
