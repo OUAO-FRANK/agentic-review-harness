@@ -470,7 +470,7 @@ git commit -m "test: assert safe fixer semantics"
 python -m unittest discover -s tests -v
 ```
 
-实际结果：77 项测试全部通过。新增两项回归测试，另有一项既有测试改为验证 AST 语义，因此测试总数从 75 项增加到 77 项。
+实际结果：79 项测试全部通过。基线恢复阶段新增两项回归测试，发布阶段又新增两项公开发布检查，因此测试总数从 75 项增加到 79 项。
 
 - [x] **步骤 2：运行 Python 编译检查**
 

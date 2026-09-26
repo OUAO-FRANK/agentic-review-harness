@@ -29,7 +29,7 @@
 
 仓库当前以可重复的离线验证为主，不把受控 fixture 结果表述为线上生产指标：
 
-- `python -m unittest discover -s tests -v`：77 项测试通过
+- `python -m unittest discover -s tests -v`：79 项测试通过
 - `python -m compileall -q evoagent scripts tests`：通过
 - `evaluation_data/`：100 条代码审查 fixture、130 条提示词演进 fixture，可重复生成且内容稳定
 - 提示词演进证明：在受控 fixture 上验证反馈、回放、holdout 和激活门禁链路
