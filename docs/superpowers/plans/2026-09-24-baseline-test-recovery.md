@@ -2,7 +2,7 @@
 
 > **面向 AI 代理的工作者：** 必需子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现此计划。步骤使用复选框（`- [ ]`）语法来跟踪进度。
 
-**目标：** 安全导入现有代码，修复 SQLite 连接泄漏，恢复可重复的离线评测 fixture，并使现有 75 项测试及 3 项新增回归测试全部通过。
+**目标：** 安全导入现有代码，修复 SQLite 连接泄漏，恢复可重复的离线评测 fixture，并使现有测试与新增回归测试全部通过。
 
 **架构：** 保留现有模块边界。`TaskStore` 统一管理短生命周期 SQLite 连接；独立 fixture 生成模块负责生成并校验公开离线语料；SafeFixer 测试验证 AST 语义而非格式。项目重命名、安全加固和 README 重写留给后续独立计划。
 
@@ -462,7 +462,7 @@ git commit -m "test: assert safe fixer semantics"
 
 - 不创建业务文件；只更新本计划中的复选框和实际验证结果。
 
-- [ ] **步骤 1：运行完整测试**
+- [x] **步骤 1：运行完整测试**
 
 运行：
 
@@ -470,9 +470,9 @@ git commit -m "test: assert safe fixer semantics"
 python -m unittest discover -s tests -v
 ```
 
-预期：78 项测试全部通过。新增三项测试后数量从 75 增至 78；如实际新增数量不同，以测试发现输出为准并说明原因。
+实际结果：77 项测试全部通过。新增两项回归测试，另有一项既有测试改为验证 AST 语义，因此测试总数从 75 项增加到 77 项。
 
-- [ ] **步骤 2：运行 Python 编译检查**
+- [x] **步骤 2：运行 Python 编译检查**
 
 运行：
 
@@ -480,9 +480,9 @@ python -m unittest discover -s tests -v
 python -m compileall -q evoagent scripts tests
 ```
 
-预期：退出码 0。
+实际结果：退出码 0。
 
-- [ ] **步骤 3：确认工作区和历史边界**
+- [x] **步骤 3：确认工作区和历史边界**
 
 运行：
 
@@ -492,7 +492,7 @@ git log --oneline --decorate
 git ls-files | rg '(^|/)(\.env|.*\.db|__pycache__|.*\.pyc)$'
 ```
 
-预期：不输出敏感或生成文件；工作区只包含明确说明的计划进度变更。
+实际结果：未发现敏感文件或生成文件，历史中的提交邮箱已统一为 GitHub noreply 地址。
 
 - [ ] **步骤 4：形成阶段报告**
 
