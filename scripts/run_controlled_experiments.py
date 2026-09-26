@@ -29,7 +29,7 @@ def render_summary(report):
         return "%.2f%%" % (100.0 * float(value))
 
     lines = [
-        "# EvoAgent 100 条受控集实验结果", "",
+        "# Agentic Review Harness 100 条受控集实验结果", "",
         "> 执行模式：`controlled-offline-no-llm`。本报告没有调用大模型，",
         "> 只验证确定性规则、Agent 编排计数和 Skill 选择门禁。", "",
         "## 数据", "",

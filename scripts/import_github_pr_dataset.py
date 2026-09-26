@@ -25,7 +25,7 @@ def fetch_diff(repository, pull_request, token=""):
     url = "https://api.github.com/repos/%s/pulls/%d" % (repository, pull_request)
     headers = {
         "Accept": "application/vnd.github.v3.diff",
-        "User-Agent": "evoagent-evaluation-importer",
+        "User-Agent": "agentic-review-harness-evaluation-importer",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     if token:

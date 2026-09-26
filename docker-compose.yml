@@ -2,13 +2,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: evoagent
-      POSTGRES_USER: evoagent
-      POSTGRES_PASSWORD: evoagent-local
+      POSTGRES_DB: agentic_review_harness
+      POSTGRES_USER: agentic_review_harness
+      POSTGRES_PASSWORD: ${AGENTIC_REVIEW_POSTGRES_PASSWORD:?Set AGENTIC_REVIEW_POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U evoagent"]
+      test: ["CMD-SHELL", "pg_isready -U agentic_review_harness"]
       interval: 5s
       timeout: 3s
       retries: 15
@@ -24,20 +24,20 @@ services:
       timeout: 3s
       retries: 15
 
-  evoagent:
+  agentic-review-harness:
     build: .
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       EVOAGENT_HOST: 0.0.0.0
-      EVOAGENT_DATABASE_URL: postgresql://evoagent:evoagent-local@postgres:5432/evoagent
+      EVOAGENT_DATABASE_URL: postgresql://agentic_review_harness:${AGENTIC_REVIEW_POSTGRES_PASSWORD:?Set AGENTIC_REVIEW_POSTGRES_PASSWORD in .env}@postgres:5432/agentic_review_harness
       EVOAGENT_REDIS_URL: redis://redis:6379/0
       EVOAGENT_ASYNC_WORKERS: 4
       EVOAGENT_SKILLS_DIR: /app/skills
       EVOAGENT_AUTH_REQUIRED: "true"
-      EVOAGENT_AUTH_SECRET: ${EVOAGENT_AUTH_SECRET:-local-only-change-this-secret-123456}
-      EVOAGENT_BOOTSTRAP_ADMIN_USERNAME: ${EVOAGENT_BOOTSTRAP_ADMIN_USERNAME:-admin}
-      EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD: ${EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD:-evoagent-local-admin}
+      EVOAGENT_AUTH_SECRET: ${EVOAGENT_AUTH_SECRET:?Set a random EVOAGENT_AUTH_SECRET in .env}
+      EVOAGENT_BOOTSTRAP_ADMIN_USERNAME: ${EVOAGENT_BOOTSTRAP_ADMIN_USERNAME:?Set EVOAGENT_BOOTSTRAP_ADMIN_USERNAME in .env}
+      EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD: ${EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD:?Set a strong EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD in .env}
     env_file:
       - path: .env
         required: false

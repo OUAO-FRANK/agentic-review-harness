@@ -34,7 +34,7 @@ WEB_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "web"))
 class ApiHandler(BaseHTTPRequestHandler):
     service: ReviewService
     settings: Settings
-    server_version = "EvoAgent/0.3"
+    server_version = "Agentic-Review-Harness/0.3"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print("%s - %s" % (self.address_string(), fmt % args))
@@ -574,7 +574,7 @@ def run() -> None:
     service = ReviewService(settings)
     handler = type("ConfiguredApiHandler", (ApiHandler,), {"service": service, "settings": settings})
     server = ThreadingHTTPServer((settings.host, settings.port), handler)
-    print("EvoAgent dashboard: http://%s:%d" % (settings.host, settings.port))
+    print("Agentic Review Harness dashboard: http://%s:%d" % (settings.host, settings.port))
     print("Persistence: %s | Queue: %s | Orchestrator: %s" % (
         "postgresql" if settings.database_url else "sqlite", service.queue.backend, service.reviewer.name
     ))

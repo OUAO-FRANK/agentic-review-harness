@@ -1,4 +1,8 @@
-# EvoAgent PR Reviewer
+# Agentic Review Harness
+
+面向 GitHub Pull Request 的多智能体代码审查与安全修复实验项目。
+
+> 兼容性说明：公开品牌已统一为 `Agentic Review Harness`，但 Python 包名 `evoagent` 和环境变量前缀 `EVOAGENT_*` 暂时保留，避免破坏已有脚本、部署文件和本地配置。
 
 - 审查统一 diff，输出结构化问题、修复建议和测试建议
 - GitHub `pull_request` webhook（`opened`、`reopened`、`synchronize`）
@@ -21,6 +25,17 @@
 - 自动修复后的编译/测试门禁、灰度发布与影子流量
 - OpenTelemetry Trace、Prometheus 指标和持久化告警
 
+## 验证状态
+
+仓库当前以可重复的离线验证为主，不把受控 fixture 结果表述为线上生产指标：
+
+- `python -m unittest discover -s tests -v`：77 项测试通过
+- `python -m compileall -q evoagent scripts tests`：通过
+- `evaluation_data/`：100 条代码审查 fixture、130 条提示词演进 fixture，可重复生成且内容稳定
+- 提示词演进证明：在受控 fixture 上验证反馈、回放、holdout 和激活门禁链路
+
+真实 GitHub webhook、外部 LLM、PostgreSQL/Redis 和公网部署仍需要按本文配置后单独验证。
+
 ## 快速开始
 
 项目使用 Python 3.11。先安装锁定范围内的运行依赖，并在同一个 PowerShell 窗口中配置本地管理员：
@@ -38,7 +53,7 @@ $env:EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD = '<替换为至少 10 个字符的密码
 python -m evoagent
 ```
 
-不要直接使用示例占位符作为密码或密钥。环境变量只对当前 PowerShell 及其子进程生效；修改配置后需要停止并重新启动 EvoAgent。服务可以在未配置模型时启动并提供健康检查，但提交审查前必须按下方“模型配置”章节配置模型。
+不要直接使用示例占位符作为密码或密钥。环境变量只对当前 PowerShell 及其子进程生效；修改配置后需要停止并重新启动 Agentic Review Harness。服务可以在未配置模型时启动并提供健康检查，但提交审查前必须按下方“模型配置”章节配置模型。
 
 Bootstrap 管理员只在用户名尚不存在时创建；已有同名用户的密码不会在重启时被覆盖。
 
@@ -74,6 +89,18 @@ Invoke-WebRequest -Headers $headers http://127.0.0.1:8080/v1/tasks/<task-id>/rep
 ```powershell
 python -m unittest discover -s tests -v
 ```
+
+## Docker Compose
+
+Compose 启动会运行 PostgreSQL、Redis 和 Web 服务。先复制 `.env.example` 为 `.env`，并填写随机认证密钥、管理员凭据和 PostgreSQL 密码；Compose 不再提供弱默认值：
+
+```powershell
+Copy-Item .env.example .env
+# 编辑 .env，至少填写 EVOAGENT_AUTH_SECRET、EVOAGENT_BOOTSTRAP_ADMIN_*、AGENTIC_REVIEW_POSTGRES_PASSWORD
+docker compose up --build
+```
+
+默认只将 Web 服务绑定到本机 `127.0.0.1:8080`。需要接收 GitHub webhook 时，应通过受控的 HTTPS 反向代理或临时隧道暴露专用 webhook 路径，并保持认证和强凭据启用。
 
 ## 模型配置
 
@@ -127,10 +154,10 @@ https://<公网域名>/webhooks/github
 http://127.0.0.1:8080/webhooks/github
         │
         ▼
-EvoAgent 创建异步审查任务
+Agentic Review Harness 创建异步审查任务
 ```
 
-### 1. 配置 EvoAgent
+### 1. 配置 Agentic Review Harness
 
 先生成一个 Webhook Secret，并根据需要配置 GitHub fine-grained personal access token：
 
@@ -156,7 +183,7 @@ fine-grained PAT 只授权需要接入的仓库，并按功能授予最小权限
 - 回写审查评论：`Pull requests: Read and write`；
 - 创建自动修复分支和提交：`Contents: Read and write`、`Pull requests: Read and write`。
 
-只接收 Webhook 但不访问私有仓库、不回写评论且不执行自动修复时，可以不设置 PAT。密钥必须在启动 EvoAgent 前设置，修改后需要重启服务。
+只接收 Webhook 但不访问私有仓库、不回写评论且不执行自动修复时，可以不设置 PAT。密钥必须在启动 Agentic Review Harness 前设置，修改后需要重启服务。
 
 ### 2. 建立公网转发
 
@@ -170,7 +197,7 @@ cloudflared tunnel --url http://127.0.0.1:8080
 ngrok http 8080
 ```
 
-命令启动后会显示一个形如 `https://example.trycloudflare.com` 或 `https://example.ngrok-free.app` 的公网 HTTPS 地址。保持 EvoAgent 和转发进程同时运行。临时公网地址通常会在转发工具重启后变化，变化后必须同步更新 GitHub Webhook 的 Payload URL。
+命令启动后会显示一个形如 `https://example.trycloudflare.com` 或 `https://example.ngrok-free.app` 的公网 HTTPS 地址。保持 Agentic Review Harness 和转发进程同时运行。临时公网地址通常会在转发工具重启后变化，变化后必须同步更新 GitHub Webhook 的 Payload URL。
 
 上述快捷转发会把 8080 端口上的管理台和 API 一并暴露到公网，因此必须保持 `EVOAGENT_AUTH_REQUIRED=true`，并使用强管理员密码和随机 `EVOAGENT_AUTH_SECRET`。长期部署建议通过反向代理只公开 `/webhooks/github`（以及按需公开 `/health`），不要向公网暴露整个管理台。
 
@@ -185,7 +212,7 @@ ngrok http 8080
 - **Which events would you like to trigger this webhook?**：选择 **Let me select individual events**，只勾选 **Pull requests**；
 - **Active**：保持勾选。
 
-EvoAgent 会处理 `opened`、`reopened` 和 `synchronize` 三种 PR 动作；其他 `pull_request` 动作会正常接收但被忽略。服务会根据 payload 中的 `diff_url` 下载 Diff，并异步创建审查任务。
+Agentic Review Harness 会处理 `opened`、`reopened` 和 `synchronize` 三种 PR 动作；其他 `pull_request` 动作会正常接收但被忽略。服务会根据 payload 中的 `diff_url` 下载 Diff，并异步创建审查任务。
 
 ### 4. 验证连接
 
@@ -249,7 +276,7 @@ HTTP / GitHub Webhook
  ReviewService ── TaskStore(SQLite / PostgreSQL)
         │
         ▼
-        ReviewHarness (EvoAgent Runtime / checkpoint / resume / budget / trace)
+        ReviewHarness (Agentic Review Harness Runtime / checkpoint / resume / budget / trace)
         │
         ├── DiffParser
         ├── Redis Streams / ACK / lease / retry / DLQ

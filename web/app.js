@@ -100,7 +100,7 @@ function show(view, updateHash = true) {
   });
   $(`#view-${view}`).classList.add("active");
   $("#page-title").textContent = titles[view];
-  document.title = `${titles[view]} · EvoAgent`;
+  document.title = `${titles[view]} · Agentic Review Harness`;
   if (updateHash) history.replaceState(null, "", `#${view}`);
 
   if (view === "tasks") loadTasks();

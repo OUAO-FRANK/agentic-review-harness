@@ -1,7 +1,7 @@
 """Auditable offline proof for feedback-driven prompt evolution.
 
 This module deliberately uses a deterministic prompt-policy reviewer.  It proves
-that EvoAgent's feedback -> prompt version -> replay -> holdout -> activation
+that the Agentic Review Harness feedback -> prompt version -> replay -> holdout -> activation
 loop changes agent behavior under controlled conditions. It does not claim that
 an unconfigured external LLM improved, and reports produced here are marked as
 offline fixtures.
@@ -271,7 +271,7 @@ def render_markdown(report: Dict[str, Any]) -> str:
         )
 
     lines = [
-        "# EvoAgent 提示词版本进化回放证明",
+        "# Agentic Review Harness 提示词版本进化回放证明",
         "",
         "## 结论",
         "",

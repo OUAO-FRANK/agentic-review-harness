@@ -202,10 +202,10 @@ class VerifiedPatchFixer:
         branch = "evoagent/fix-pr-%d-%s" % (pull_request, stamp)
         commit = client.create_atomic_commit(
             repository, branch, source_sha, changed,
-            "fix: apply verified EvoAgent patch for PR #%d" % pull_request,
+            "fix: apply verified Agentic Review Harness patch for PR #%d" % pull_request,
         )
         draft = client.create_draft_pull_request(
-            repository, "fix: verified EvoAgent patch for #%d" % pull_request,
+            repository, "fix: verified Agentic Review Harness patch for #%d" % pull_request,
             branch, pull.get("base", {}).get("ref", "main"),
             "LLM-generated patch. AST/CST, compilation and configured tests passed in an isolated checkout. This PR is intentionally a draft.",
         )

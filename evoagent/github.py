@@ -26,7 +26,7 @@ class GitHubClient:
         self.max_attempts = max_attempts
 
     def _headers(self, accept: str = "application/vnd.github+json") -> Dict[str, str]:
-        headers = {"Accept": accept, "User-Agent": "EvoAgent/0.1", "X-GitHub-Api-Version": "2022-11-28"}
+        headers = {"Accept": accept, "User-Agent": "Agentic-Review-Harness/0.1", "X-GitHub-Api-Version": "2022-11-28"}
         if self.token:
             headers["Authorization"] = "Bearer " + self.token
         return headers
@@ -201,7 +201,7 @@ class GitHubAppAuthenticator:
             "https://api.github.com/app/installations/%d/access_tokens" % installation_id,
             data=b"{}", method="POST",
             headers={"Authorization": "Bearer " + self.app_jwt(), "Accept": "application/vnd.github+json",
-                     "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "EvoAgent/0.3",
+                     "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "Agentic-Review-Harness/0.3",
                      "Content-Type": "application/json"},
         )
         with urllib.request.urlopen(request, timeout=30) as response:
