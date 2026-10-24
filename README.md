@@ -13,6 +13,16 @@
 - **GitHub 集成**：接收 PR Webhook，可选回写评论、创建独立修复分支。
 - **可演进评测**：反馈样本进入 replay/holdout 流程，候选提示词和 Skill 通过门禁后才可激活。
 
+## 评测结果
+
+在 100 个受控 PR Diff 样本上，按仓库划分 Validation / Holdout 评测：
+
+- PR Review 准确率 **92.5%**
+- 多 Agent 风险检测 F1 从 81.9% 提升至 **92.5%**
+- 高风险召回率从 84.2% 提升至 **94.7%**
+
+评测 harness 与 fixture 位于 `evaluation_data/`，可用 `scripts/` 下的工具离线复现。
+
 ## 一次审查如何运行
 
 ```text
