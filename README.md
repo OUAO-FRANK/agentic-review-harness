@@ -21,7 +21,7 @@
 - 多 Agent 风险检测 F1 从 81.9% 提升至 **92.5%**
 - 高风险召回率从 84.2% 提升至 **94.7%**
 
-评测 harness 与 fixture 位于 `evaluation_data/`，可用 `scripts/` 下的工具离线复现。
+以上结果来自项目内生成的合成 fixture（受控样本），不代表真实生产 PR 的表现。评测 harness 与 fixture 位于 `evaluation_data/`，可用 `scripts/` 下的工具离线复现。
 
 ## 一次审查如何运行
 
@@ -58,7 +58,7 @@ AgentRuntime ── checkpoint / budget / trace
 
 ## 快速开始
 
-项目使用 Python 3.11。默认 `local` provider 不需要 LLM 密钥，可以先用规则审查模式启动服务：
+项目使用 Python 3.11；Python 包名 `evoagent` 保留用于兼容现有命令。默认 `local` provider 不需要 LLM 密钥，可以先用规则审查模式启动服务：
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -83,7 +83,7 @@ Compose 默认只将 Web 服务绑定到 `127.0.0.1:8080`。
 
 ## 模型配置
 
-默认 `local` provider 使用确定性规则审查，不需要外部模型。需要多 Agent 模式时，选择一个 OpenAI Chat Completions 兼容 provider，并把密钥放在环境变量或本地 `.env` 中：
+配置继续兼容 `EVOAGENT_*` 环境变量前缀。默认 `local` provider 使用确定性规则审查，不需要外部模型。需要多 Agent 模式时，选择一个 OpenAI Chat Completions 兼容 provider，并把密钥放在环境变量或本地 `.env` 中：
 
 <details>
 <summary>DeepSeek / OpenRouter / 自定义端点</summary>
