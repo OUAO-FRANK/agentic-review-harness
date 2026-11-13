@@ -75,16 +75,18 @@ git push origin <当前功能分支>
 
 ## PR 组织策略
 
-不按每天两个 PR 拆分。60 个碎片 PR 会削弱审查质量，也不利于面试官理解演进过程。两个每日提交按依赖聚合为 6 个可独立审查的 PR：
+不按每天两个 PR 拆分。60 个碎片 PR 会削弱审查质量，也不利于面试官理解演进过程。两个每日提交按依赖聚合为 8 个可独立审查的 PR，使默认分支每 2–5 天获得一次稳定更新：
 
 1. Days 1–5：安装、CLI、Action 与 GitHub App 接入。
-2. Days 6–13：Change Planner 与多语言 ContextBundle。
-3. Days 14–17：分阶段 Pipeline、并发恢复与 Falsifier。
-4. Days 18–21：Finding 生命周期与双数据库持久化。
-5. Days 22–25：inline Review、去重、Outbox 与增量审查。
-6. Days 26–30：真实 Benchmark、Sandbox、演示与 Preview Release。
+2. Days 6–9：Change Planner、确定性分组与 Token 预算。
+3. Days 10–13：ContextBundle 与 Python、JavaScript/TypeScript、Go 上下文分析。
+4. Days 14–17：分阶段 Pipeline、并发恢复与 Falsifier。
+5. Days 18–21：Finding 生命周期与双数据库持久化。
+6. Days 22–25：inline Review、去重、Outbox 与增量审查。
+7. Days 26–27：真实 Benchmark、置信区间、成本与重放证据。
+8. Days 28–30：Sandbox、配对修复证据、演示与 Preview Release。
 
-每个 PR 创建或更新前同样展示变更摘要、测试结果和风险，不自动合并。
+每个阶段结束后创建 PR，附带变更摘要、测试结果、风险和演示步骤。检查通过后使用普通 merge commit 合并，保留阶段内的每日 commit；随后从最新 `main` 继续下一阶段。不得使用 squash、force push 或历史重写。这样功能分支保留审查边界，默认分支的最近维护时间最长不会超过 5 天。
 
 ## 每周面试材料产出
 
