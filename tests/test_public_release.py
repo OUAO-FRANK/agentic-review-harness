@@ -14,6 +14,8 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertEqual("agentic-review-harness", settings.otel_service_name)
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("Python 包名 `evoagent`", readme)
+        self.assertIn("合成 fixture", readme)
+        self.assertIn("不代表真实生产 PR", readme)
         self.assertIn("EVOAGENT_*", readme)
         self.assertNotIn("python -m Agentic Review Harness", readme)
 
