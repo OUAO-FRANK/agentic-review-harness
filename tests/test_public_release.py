@@ -28,6 +28,16 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertNotIn("local-only-change-this-secret", compose)
         self.assertNotIn("evoagent-local-admin", compose)
 
+    def test_ci_runs_the_baseline_on_windows_and_linux(self):
+        workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
+        self.assertTrue(workflow_path.is_file(), "cross-platform CI workflow is missing")
+        workflow = workflow_path.read_text(encoding="utf-8")
+        self.assertIn("ubuntu-latest", workflow)
+        self.assertIn("windows-latest", workflow)
+        self.assertIn('python-version: "3.11"', workflow)
+        self.assertIn("python -m unittest discover -s tests -v", workflow)
+        self.assertIn("python -m compileall -q evoagent scripts tests", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
