@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-review-harness"
+description = "Evidence-first multi-agent review harness for GitHub pull requests"
+readme = "README.md"
+requires-python = ">=3.11"
+dynamic = ["version", "dependencies"]
+
+[project.urls]
+Repository = "https://github.com/OUAO-FRANK/agentic-review-harness"
+
+[tool.setuptools.dynamic]
+version = { attr = "evoagent.__version__" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["evoagent*"]
