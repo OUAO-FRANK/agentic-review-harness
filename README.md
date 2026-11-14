@@ -61,7 +61,7 @@ AgentRuntime ── checkpoint / budget / trace
 项目使用 Python 3.11；Python 包名 `evoagent` 保留用于兼容现有命令。默认 `local` provider 不需要 LLM 密钥，可以先用规则审查模式启动服务：
 
 ```powershell
-python -m pip install -r requirements.txt
+python -m pip install -e .
 python -m evoagent
 ```
 
