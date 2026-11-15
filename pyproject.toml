@@ -9,6 +9,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 dynamic = ["version", "dependencies"]
 
+[project.scripts]
+agentic-review = "evoagent.cli:entrypoint"
+
 [project.urls]
 Repository = "https://github.com/OUAO-FRANK/agentic-review-harness"
 

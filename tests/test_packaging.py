@@ -46,6 +46,14 @@ class PackagingTests(unittest.TestCase):
             self.assertEqual(1, len(wheels))
             with zipfile.ZipFile(wheels[0]) as archive:
                 self.assertIn("evoagent/__init__.py", archive.namelist())
+                entry_points = [
+                    name for name in archive.namelist() if name.endswith("entry_points.txt")
+                ]
+                self.assertEqual(1, len(entry_points))
+                self.assertIn(
+                    "agentic-review = evoagent.cli:entrypoint",
+                    archive.read(entry_points[0]).decode("utf-8"),
+                )
 
 
 if __name__ == "__main__":

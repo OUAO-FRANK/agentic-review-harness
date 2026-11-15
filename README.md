@@ -65,6 +65,12 @@ python -m pip install -e .
 python -m evoagent
 ```
 
+安装后可运行环境诊断；配置有效时退出码为 0，配置缺失或非法时退出码为 1：
+
+```powershell
+agentic-review doctor
+```
+
 打开 `http://127.0.0.1:8080/` 查看管理台，健康检查地址为 `http://127.0.0.1:8080/health`。本地开发默认关闭登录；需要启用登录时，在启动前设置 `EVOAGENT_AUTH_REQUIRED=true`、`EVOAGENT_AUTH_SECRET` 和管理员凭据。
 
 服务也可以通过 `POST /v1/reviews` 接收 Diff，通过 `GET /v1/tasks/{id}/report` 获取 Markdown 报告。完整请求模型见 `evoagent/api.py`，README 不展开端点清单。
