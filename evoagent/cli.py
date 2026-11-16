@@ -1,6 +1,7 @@
 """Command-line entry points for Agentic Review Harness."""
 
 import argparse
+import json
 import os
 import sys
 from contextlib import contextmanager
@@ -48,7 +49,38 @@ def _doctor(
     return 0
 
 
-def _review(source: str, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
+def _json_output(payload: object, stdout: TextIO) -> None:
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True), file=stdout)
+
+
+def _review_error(
+    code: str,
+    message: str,
+    output_format: str,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    if output_format == "json":
+        _json_output(
+            {
+                "schema_version": 1,
+                "status": "error",
+                "error": {"code": code, "message": message},
+            },
+            stdout,
+        )
+    else:
+        print("review: error: %s" % message, file=stderr)
+    return 1
+
+
+def _review(
+    source: str,
+    output_format: str,
+    stdin: TextIO,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
     try:
         if source == "-":
             diff = stdin.read()
@@ -56,15 +88,38 @@ def _review(source: str, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
             with open(source, "r", encoding="utf-8-sig") as handle:
                 diff = handle.read()
     except (OSError, UnicodeError) as exc:
-        print("review: error: %s" % exc, file=stderr)
-        return 1
+        return _review_error(
+            "input-read-failed", str(exc), output_format, stdout, stderr
+        )
 
     parsed = parse_unified_diff(diff)
     if not parsed.added_lines:
-        print("review: error: input contains no reviewable added lines", file=stderr)
-        return 1
+        return _review_error(
+            "invalid-diff",
+            "input contains no reviewable added lines",
+            output_format,
+            stdout,
+            stderr,
+        )
 
     findings = LocalRuleReviewer().review(diff, parsed)
+    if output_format == "json":
+        _json_output(
+            {
+                "schema_version": 1,
+                "status": "ok",
+                "reviewer": LocalRuleReviewer.name,
+                "summary": {
+                    "file_count": len(parsed.files),
+                    "finding_count": len(findings),
+                },
+                "files": parsed.files,
+                "findings": [finding.to_dict() for finding in findings],
+            },
+            stdout,
+        )
+        return 0
+
     noun = "finding" if len(findings) == 1 else "findings"
     print(
         "Review completed: %d %s across %d file(s)."
@@ -104,6 +159,12 @@ def main(
         default="-",
         help="UTF-8 diff file, or - / omitted to read stdin",
     )
+    review.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="output format (default: text)",
+    )
     args = parser.parse_args(argv)
 
     output = stdout or sys.stdout
@@ -112,7 +173,7 @@ def main(
     if args.command == "doctor":
         return _doctor(environ, output, error)
     if args.command == "review":
-        return _review(args.source, input_stream, output, error)
+        return _review(args.source, args.format, input_stream, output, error)
     parser.error("unsupported command: %s" % args.command)
     return 2
 

@@ -1,6 +1,7 @@
 import importlib
 import importlib.util
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -86,6 +87,83 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(1, code)
         self.assertIn("reviewable added lines", error.getvalue())
+
+    def test_review_emits_stable_json_output(self):
+        first = io.StringIO()
+        second = io.StringIO()
+        first_code = self._run_cli(
+            ["review", "--format", "json"],
+            stdin=io.StringIO(RISKY_DIFF),
+            stdout=first,
+        )
+        second_code = self._run_cli(
+            ["review", "--format", "json"],
+            stdin=io.StringIO(RISKY_DIFF),
+            stdout=second,
+        )
+
+        self.assertEqual(0, first_code)
+        self.assertEqual(0, second_code)
+        self.assertEqual(first.getvalue(), second.getvalue())
+        payload = json.loads(first.getvalue())
+        self.assertEqual(
+            {
+                "files",
+                "findings",
+                "reviewer",
+                "schema_version",
+                "status",
+                "summary",
+            },
+            set(payload),
+        )
+        self.assertEqual(1, payload["schema_version"])
+        self.assertEqual("ok", payload["status"])
+        self.assertEqual("local-rules", payload["reviewer"])
+        self.assertEqual({"file_count": 1, "finding_count": 1}, payload["summary"])
+        self.assertEqual(["app.py"], payload["files"])
+        self.assertEqual("SEC-EVAL", payload["findings"][0]["rule_id"])
+        self.assertEqual("critical", payload["findings"][0]["severity"])
+
+    def test_review_emits_structured_json_errors(self):
+        output = io.StringIO()
+        error = io.StringIO()
+        code = self._run_cli(
+            ["review", "--format", "json"],
+            stdin=io.StringIO("not a unified diff"),
+            stdout=output,
+            stderr=error,
+        )
+
+        self.assertEqual(1, code)
+        self.assertEqual("", error.getvalue())
+        self.assertEqual(
+            {
+                "schema_version": 1,
+                "status": "error",
+                "error": {
+                    "code": "invalid-diff",
+                    "message": "input contains no reviewable added lines",
+                },
+            },
+            json.loads(output.getvalue()),
+        )
+
+    def test_review_reports_json_file_read_errors(self):
+        output = io.StringIO()
+        error = io.StringIO()
+        code = self._run_cli(
+            ["review", "missing.diff", "--format", "json"],
+            stdout=output,
+            stderr=error,
+        )
+
+        self.assertEqual(1, code)
+        self.assertEqual("", error.getvalue())
+        payload = json.loads(output.getvalue())
+        self.assertEqual("error", payload["status"])
+        self.assertEqual("input-read-failed", payload["error"]["code"])
+        self.assertIn("missing.diff", payload["error"]["message"])
 
 
 if __name__ == "__main__":

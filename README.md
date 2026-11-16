@@ -78,6 +78,17 @@ git diff | agentic-review review
 agentic-review review change.diff
 ```
 
+自动化场景使用稳定的 JSON 合约：
+
+```powershell
+git diff | agentic-review review --format json
+```
+
+成功结果包含 `schema_version`、`status`、`reviewer`、`summary`、`files` 和
+`findings`；失败结果包含 `schema_version`、`status` 和
+`error.code`/`error.message`，同时返回非零退出码。JSON 模式只向 stdout
+写入 JSON，默认文本模式保持适合终端阅读的输出。
+
 打开 `http://127.0.0.1:8080/` 查看管理台，健康检查地址为 `http://127.0.0.1:8080/health`。本地开发默认关闭登录；需要启用登录时，在启动前设置 `EVOAGENT_AUTH_REQUIRED=true`、`EVOAGENT_AUTH_SECRET` 和管理员凭据。
 
 服务也可以通过 `POST /v1/reviews` 接收 Diff，通过 `GET /v1/tasks/{id}/report` 获取 Markdown 报告。完整请求模型见 `evoagent/api.py`，README 不展开端点清单。
