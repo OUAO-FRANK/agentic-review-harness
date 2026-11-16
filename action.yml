@@ -1,0 +1,46 @@
+name: Agentic Review Harness
+description: Review a unified diff and produce a structured report.
+author: OUAO-FRANK
+
+inputs:
+  diff-path:
+    description: Path to the UTF-8 unified diff file to review.
+    required: false
+    default: change.diff
+  mode:
+    description: Review depth. Supported values are fast and deep.
+    required: false
+    default: fast
+  output-path:
+    description: Path for the structured JSON review report.
+    required: false
+    default: agentic-review.json
+  python-version:
+    description: Python version used to run Agentic Review Harness.
+    required: false
+    default: "3.11"
+
+outputs:
+  report-path:
+    description: Path to the structured JSON review report.
+    value: ${{ inputs.output-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate review mode
+      shell: bash
+      env:
+        REVIEW_MODE: ${{ inputs.mode }}
+      run: |
+        case "$REVIEW_MODE" in
+          fast|deep) ;;
+          *)
+            echo "Unsupported review mode: $REVIEW_MODE" >&2
+            exit 2
+            ;;
+        esac
+
+branding:
+  icon: check-circle
+  color: blue

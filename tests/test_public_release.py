@@ -1,6 +1,8 @@
 import unittest
 from pathlib import Path
 
+import yaml
+
 from evoagent.config import Settings
 
 
@@ -37,6 +39,31 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertIn('python-version: "3.11"', workflow)
         self.assertIn("python -m unittest discover -s tests -v", workflow)
         self.assertIn("python -m compileall -q evoagent scripts tests", workflow)
+
+    def test_github_action_declares_inputs_outputs_and_permissions(self):
+        action_path = ROOT / "action.yml"
+        self.assertTrue(action_path.is_file(), "GitHub Action metadata is missing")
+        action = yaml.safe_load(action_path.read_text(encoding="utf-8"))
+
+        self.assertEqual("composite", action["runs"]["using"])
+        self.assertEqual(
+            {"diff-path", "mode", "output-path", "python-version"},
+            set(action["inputs"]),
+        )
+        self.assertEqual("fast", action["inputs"]["mode"]["default"])
+        self.assertEqual("3.11", action["inputs"]["python-version"]["default"])
+        self.assertEqual(
+            "agentic-review.json", action["inputs"]["output-path"]["default"]
+        )
+        self.assertEqual(
+            "${{ inputs.output-path }}",
+            action["outputs"]["report-path"]["value"],
+        )
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("contents: read", readme)
+        self.assertIn("pull-requests: write", readme)
+        self.assertNotIn("token", action["inputs"])
 
 
 if __name__ == "__main__":
