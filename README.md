@@ -98,8 +98,9 @@ permissions:
 ```
 
 Action 合约提供 `diff-path`、`mode`、`output-path` 和 `python-version` 输入，
-并通过 `report-path` 输出结构化报告路径。`mode` 默认为 `fast`，可选
-`deep`；Action 不接收 GitHub token 输入，由调用工作流控制权限。
+并通过 `report-path` 输出结构化报告路径。当前预览版执行 `fast` 模式；
+`deep` 已预留但会明确失败，待分阶段 Pipeline 和沙箱能力完成后开放。
+Action 不接收 GitHub token 输入，由调用工作流控制权限。
 
 打开 `http://127.0.0.1:8080/` 查看管理台，健康检查地址为 `http://127.0.0.1:8080/health`。本地开发默认关闭登录；需要启用登录时，在启动前设置 `EVOAGENT_AUTH_REQUIRED=true`、`EVOAGENT_AUTH_SECRET` 和管理员凭据。
 

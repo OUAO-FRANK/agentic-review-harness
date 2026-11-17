@@ -65,6 +65,44 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertIn("pull-requests: write", readme)
         self.assertNotIn("token", action["inputs"])
 
+    def test_github_action_runs_the_cli_and_uploads_the_report(self):
+        action = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+        steps = action["runs"]["steps"]
+
+        setup_steps = [
+            step for step in steps if step.get("uses") == "actions/setup-python@v7"
+        ]
+        self.assertEqual(1, len(setup_steps), "Python setup step is missing")
+        setup = setup_steps[0]
+        self.assertEqual("${{ inputs.python-version }}", setup["with"]["python-version"])
+
+        commands = "\n".join(step.get("run", "") for step in steps)
+        self.assertIn('python -m pip install "$GITHUB_ACTION_PATH"', commands)
+        self.assertIn(
+            'agentic-review review "$DIFF_PATH" --format json > "$OUTPUT_PATH"',
+            commands,
+        )
+
+        review_steps = [step for step in steps if step.get("name") == "Run review"]
+        self.assertEqual(1, len(review_steps), "review execution step is missing")
+        review = review_steps[0]
+        self.assertEqual("${{ inputs.diff-path }}", review["env"]["DIFF_PATH"])
+        self.assertEqual("${{ inputs.output-path }}", review["env"]["OUTPUT_PATH"])
+
+        upload_steps = [
+            step for step in steps if step.get("uses") == "actions/upload-artifact@v7"
+        ]
+        self.assertEqual(1, len(upload_steps), "artifact upload step is missing")
+        upload = upload_steps[0]
+        self.assertEqual("${{ inputs.output-path }}", upload["with"]["path"])
+        self.assertEqual("error", upload["with"]["if-no-files-found"])
+
+    def test_github_action_rejects_unavailable_deep_mode(self):
+        action = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+        validation = action["runs"]["steps"][0]["run"]
+        self.assertNotIn("fast|deep", validation)
+        self.assertIn("deep mode is not available", validation)
+
 
 if __name__ == "__main__":
     unittest.main()
