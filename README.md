@@ -148,7 +148,23 @@ python -m evoagent
 
 ## GitHub Webhook
 
-接入方式是 GitHub Webhook + HTTPS 转发 + fine-grained PAT，不需要安装 GitHub App。服务接收 `opened`、`reopened` 和 `synchronize` 事件，并异步创建审查任务。
+推荐使用 GitHub App 接入多个仓库：安装令牌按安装范围签发，服务从 PR Webhook 的 `installation.id` 获取对应令牌。服务接收 `opened`、`reopened` 和 `synchronize` 事件，并异步创建审查任务。当前 Webhook 的 Agent 审查仍要求已配置模型；本地 CLI 的规则审查不受影响。
+
+1. 在 GitHub **Settings → Developer settings → GitHub Apps → New GitHub App** 注册 App。Webhook URL 填 `https://<公网域名>/webhooks/github`，启用 Webhook、设置随机 Secret，并订阅 **Pull request** 事件。仓库权限至少为 `Contents: Read`、`Pull requests: Read`；开启回写评论时将 `Pull requests` 提升为 `Write`。只有启用自动修复并确需创建分支/提交时，才增加 `Contents: Write`。按需要安装到指定仓库。
+2. 将生成的私钥文件保存在仓库之外，配置以下环境变量。Webhook Secret 与 GitHub App 私钥、登录密钥分别管理。
+
+```powershell
+$env:EVOAGENT_GITHUB_APP_ID = '<app-id>'
+$env:EVOAGENT_GITHUB_APP_SLUG = '<app-slug>'
+$env:EVOAGENT_GITHUB_PRIVATE_KEY_PATH = '<absolute-path-to-private-key.pem>'
+$env:EVOAGENT_GITHUB_WEBHOOK_SECRET = '<webhook-secret>'
+$env:EVOAGENT_PUBLIC_BASE_URL = 'https://<公网域名>'
+$env:EVOAGENT_AUTO_POST_REVIEW = 'true'
+```
+
+3. 启动服务后打开 `/github/install` 进入 GitHub 安装页。App 的 Setup URL 可以填 `https://<公网域名>/github/setup`；当前该回调仅记录 GitHub 传来的 installation ID，不验证该 ID 的所有权，因此不要把回调记录本身当作授权依据。实际 API 调用仍由 GitHub 安装令牌和仓库访问权限控制。
+
+本地单仓库试用也可以继续使用仓库 Webhook 与 fine-grained PAT：
 
 <details>
 <summary>配置 Webhook 和 PAT</summary>

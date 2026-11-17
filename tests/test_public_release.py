@@ -103,6 +103,19 @@ class PublicReleaseTests(unittest.TestCase):
         self.assertNotIn("fast|deep", validation)
         self.assertIn("deep mode is not available", validation)
 
+    def test_readme_recommends_github_app_with_installation_credentials(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        github_section = readme.split("## GitHub Webhook", 1)[1].split("## 接入方式", 1)[0]
+        self.assertIn("推荐使用 GitHub App", github_section)
+        self.assertIn("EVOAGENT_GITHUB_APP_ID", github_section)
+        self.assertIn("EVOAGENT_GITHUB_APP_SLUG", github_section)
+        self.assertIn("EVOAGENT_GITHUB_PRIVATE_KEY_PATH", github_section)
+        self.assertIn("/github/install", github_section)
+        self.assertIn("/github/setup", github_section)
+        self.assertIn("Pull requests: Read", github_section)
+        self.assertIn("Contents: Read", github_section)
+        self.assertIn("fine-grained PAT", github_section)
+
 
 if __name__ == "__main__":
     unittest.main()
