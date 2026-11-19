@@ -71,6 +71,8 @@ python -m evoagent
 agentic-review doctor
 ```
 
+接入 GitHub 前运行 `agentic-review doctor --github`。它分别检查 GitHub App 或 PAT 所需的本地配置、App 私钥文件路径和公开 HTTPS URL，列出缺失的变量名，不打印凭据。GitHub Action 的本地 Diff 审查无需 GitHub 凭据；此命令不会调用 GitHub API，也不证明远端权限已授予。
+
 本地 Diff 可以从 stdin 或 UTF-8 文件审查：
 
 ```powershell

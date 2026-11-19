@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterator, Mapping, Optional, Sequence, TextIO
 
 from .config import Settings
@@ -28,7 +29,8 @@ def _environment(values: Optional[Mapping[str, str]]) -> Iterator[None]:
 
 
 def _doctor(
-    environ: Optional[Mapping[str, str]], stdout: TextIO, stderr: TextIO
+    environ: Optional[Mapping[str, str]], stdout: TextIO, stderr: TextIO,
+    github: bool = False,
 ) -> int:
     try:
         with _environment(environ):
@@ -42,11 +44,50 @@ def _doctor(
     provider = str(resolved_llm.get("provider", "local"))
     database = "postgres" if settings.database_url else "sqlite"
     queue = "redis" if settings.redis_url else "memory"
-    print("status: ok", file=stdout)
+    github_ready = _github_diagnostics(settings, stdout) if github else True
+    print("status: %s" % ("ok" if github_ready else "error"), file=stdout)
     print("provider: %s" % provider, file=stdout)
     print("database: %s" % database, file=stdout)
     print("queue: %s" % queue, file=stdout)
-    return 0
+    return 0 if github_ready else 1
+
+
+def _github_diagnostics(settings: Settings, stdout: TextIO) -> bool:
+    print("action: local diff ready", file=stdout)
+    app_fields = (
+        settings.github_app_id,
+        settings.github_app_slug,
+        settings.github_private_key_path,
+    )
+    if any(app_fields):
+        missing = []
+        for value, name in zip(app_fields, (
+            "EVOAGENT_GITHUB_APP_ID",
+            "EVOAGENT_GITHUB_APP_SLUG",
+            "EVOAGENT_GITHUB_PRIVATE_KEY_PATH",
+        )):
+            if not value:
+                missing.append(name)
+        if settings.github_private_key_path and not Path(settings.github_private_key_path).is_file():
+            missing.append("EVOAGENT_GITHUB_PRIVATE_KEY_PATH (file not found)")
+        if not settings.github_webhook_secret:
+            missing.append("EVOAGENT_GITHUB_WEBHOOK_SECRET")
+        if not settings.public_base_url.startswith("https://"):
+            missing.append("EVOAGENT_PUBLIC_BASE_URL (https required)")
+        print("github: app %s" % ("incomplete" if missing else "ready"), file=stdout)
+    elif settings.github_token or settings.github_webhook_secret:
+        missing = []
+        if not settings.github_token:
+            missing.append("EVOAGENT_GITHUB_TOKEN")
+        if not settings.github_webhook_secret:
+            missing.append("EVOAGENT_GITHUB_WEBHOOK_SECRET")
+        print("github: pat %s" % ("incomplete" if missing else "ready"), file=stdout)
+    else:
+        print("github: not configured", file=stdout)
+        return False
+    for name in missing:
+        print("missing: %s" % name, file=stdout)
+    return not missing
 
 
 def _json_output(payload: object, stdout: TextIO) -> None:
@@ -151,7 +192,8 @@ def main(
 ) -> int:
     parser = argparse.ArgumentParser(prog="agentic-review")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("doctor", help="validate the local runtime configuration")
+    doctor = commands.add_parser("doctor", help="validate the local runtime configuration")
+    doctor.add_argument("--github", action="store_true", help="check GitHub App or PAT setup")
     review = commands.add_parser("review", help="review a unified diff with local rules")
     review.add_argument(
         "source",
@@ -171,7 +213,7 @@ def main(
     error = stderr or sys.stderr
     input_stream = stdin or sys.stdin
     if args.command == "doctor":
-        return _doctor(environ, output, error)
+        return _doctor(environ, output, error, github=args.github)
     if args.command == "review":
         return _review(args.source, args.format, input_stream, output, error)
     parser.error("unsupported command: %s" % args.command)

@@ -58,6 +58,87 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(before, dict(os.environ))
 
+    def test_doctor_github_reports_missing_configuration(self):
+        output = io.StringIO()
+        code = self._run_cli(
+            ["doctor", "--github"],
+            environ={"EVOAGENT_LLM_PROVIDER": "local"},
+            stdout=output,
+        )
+        self.assertEqual(1, code)
+        self.assertIn("github: not configured", output.getvalue())
+        self.assertIn("action: local diff ready", output.getvalue())
+
+    def test_doctor_github_reports_missing_app_fields_without_secrets(self):
+        output = io.StringIO()
+        code = self._run_cli(
+            ["doctor", "--github"],
+            environ={
+                "EVOAGENT_LLM_PROVIDER": "local",
+                "EVOAGENT_GITHUB_APP_ID": "123",
+                "EVOAGENT_GITHUB_WEBHOOK_SECRET": "private-webhook-secret",
+            },
+            stdout=output,
+        )
+        self.assertEqual(1, code)
+        self.assertIn("github: app incomplete", output.getvalue())
+        self.assertIn("EVOAGENT_GITHUB_APP_SLUG", output.getvalue())
+        self.assertIn("EVOAGENT_GITHUB_PRIVATE_KEY_PATH", output.getvalue())
+        self.assertNotIn("private-webhook-secret", output.getvalue())
+
+    def test_doctor_github_accepts_complete_app_configuration(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            key_path = Path(temp_dir) / "app.pem"
+            key_path.write_text("test key", encoding="utf-8")
+            output = io.StringIO()
+            code = self._run_cli(
+                ["doctor", "--github"],
+                environ={
+                    "EVOAGENT_LLM_PROVIDER": "local",
+                    "EVOAGENT_GITHUB_APP_ID": "123",
+                    "EVOAGENT_GITHUB_APP_SLUG": "review-app",
+                    "EVOAGENT_GITHUB_PRIVATE_KEY_PATH": str(key_path),
+                    "EVOAGENT_GITHUB_WEBHOOK_SECRET": "secret",
+                    "EVOAGENT_PUBLIC_BASE_URL": "https://example.com",
+                },
+                stdout=output,
+            )
+        self.assertEqual(0, code)
+        self.assertIn("github: app ready", output.getvalue())
+
+    def test_doctor_github_accepts_pat_configuration(self):
+        output = io.StringIO()
+        code = self._run_cli(
+            ["doctor", "--github"],
+            environ={
+                "EVOAGENT_LLM_PROVIDER": "local",
+                "EVOAGENT_GITHUB_TOKEN": "private-token",
+                "EVOAGENT_GITHUB_WEBHOOK_SECRET": "secret",
+            },
+            stdout=output,
+        )
+        self.assertEqual(0, code)
+        self.assertIn("github: pat ready", output.getvalue())
+        self.assertNotIn("private-token", output.getvalue())
+
+    def test_doctor_github_rejects_missing_key_file_and_http_app_url(self):
+        output = io.StringIO()
+        code = self._run_cli(
+            ["doctor", "--github"],
+            environ={
+                "EVOAGENT_LLM_PROVIDER": "local",
+                "EVOAGENT_GITHUB_APP_ID": "123",
+                "EVOAGENT_GITHUB_APP_SLUG": "review-app",
+                "EVOAGENT_GITHUB_PRIVATE_KEY_PATH": "missing-app.pem",
+                "EVOAGENT_GITHUB_WEBHOOK_SECRET": "secret",
+                "EVOAGENT_PUBLIC_BASE_URL": "http://example.com",
+            },
+            stdout=output,
+        )
+        self.assertEqual(1, code)
+        self.assertIn("EVOAGENT_GITHUB_PRIVATE_KEY_PATH (file not found)", output.getvalue())
+        self.assertIn("EVOAGENT_PUBLIC_BASE_URL (https required)", output.getvalue())
+
     def test_review_reads_a_diff_from_stdin(self):
         output = io.StringIO()
         code = self._run_cli(
