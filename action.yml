@@ -1,0 +1,71 @@
+name: Agentic Review Harness
+description: Review a unified diff and produce a structured report.
+author: OUAO-FRANK
+
+inputs:
+  diff-path:
+    description: Path to the UTF-8 unified diff file to review.
+    required: false
+    default: change.diff
+  mode:
+    description: Review depth. fast is available; deep is reserved for a future release.
+    required: false
+    default: fast
+  output-path:
+    description: Path for the structured JSON review report.
+    required: false
+    default: agentic-review.json
+  python-version:
+    description: Python version used to run Agentic Review Harness.
+    required: false
+    default: "3.11"
+
+outputs:
+  report-path:
+    description: Path to the structured JSON review report.
+    value: ${{ inputs.output-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate review mode
+      shell: bash
+      env:
+        REVIEW_MODE: ${{ inputs.mode }}
+      run: |
+        case "$REVIEW_MODE" in
+          fast) ;;
+          deep)
+            echo "deep mode is not available in this preview" >&2
+            exit 2
+            ;;
+          *)
+            echo "Unsupported review mode: $REVIEW_MODE" >&2
+            exit 2
+            ;;
+        esac
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: ${{ inputs.python-version }}
+    - name: Install Agentic Review Harness
+      shell: bash
+      run: python -m pip install "$GITHUB_ACTION_PATH"
+    - name: Run review
+      shell: bash
+      env:
+        DIFF_PATH: ${{ inputs.diff-path }}
+        OUTPUT_PATH: ${{ inputs.output-path }}
+      run: |
+        mkdir -p "$(dirname "$OUTPUT_PATH")"
+        agentic-review review "$DIFF_PATH" --format json > "$OUTPUT_PATH"
+    - name: Upload review report
+      uses: actions/upload-artifact@v7
+      with:
+        name: agentic-review-report
+        path: ${{ inputs.output-path }}
+        if-no-files-found: error
+
+branding:
+  icon: check-circle
+  color: blue

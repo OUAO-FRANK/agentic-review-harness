@@ -21,7 +21,7 @@
 - 多 Agent 风险检测 F1 从 81.9% 提升至 **92.5%**
 - 高风险召回率从 84.2% 提升至 **94.7%**
 
-评测 harness 与 fixture 位于 `evaluation_data/`，可用 `scripts/` 下的工具离线复现。
+以上结果来自项目内生成的合成 fixture（受控样本），不代表真实生产 PR 的表现。评测 harness 与 fixture 位于 `evaluation_data/`，可用 `scripts/` 下的工具离线复现。
 
 ## 一次审查如何运行
 
@@ -58,12 +58,51 @@ AgentRuntime ── checkpoint / budget / trace
 
 ## 快速开始
 
-项目使用 Python 3.11。默认 `local` provider 不需要 LLM 密钥，可以先用规则审查模式启动服务：
+项目使用 Python 3.11；Python 包名 `evoagent` 保留用于兼容现有命令。默认 `local` provider 不需要 LLM 密钥，可以先用规则审查模式启动服务：
 
 ```powershell
-python -m pip install -r requirements.txt
+python -m pip install -e .
 python -m evoagent
 ```
+
+安装后可运行环境诊断；配置有效时退出码为 0，配置缺失或非法时退出码为 1：
+
+```powershell
+agentic-review doctor
+```
+
+接入 GitHub 前运行 `agentic-review doctor --github`。它分别检查 GitHub App 或 PAT 所需的本地配置、App 私钥文件路径和公开 HTTPS URL，列出缺失的变量名，不打印凭据。GitHub Action 的本地 Diff 审查无需 GitHub 凭据；此命令不会调用 GitHub API，也不证明远端权限已授予。
+
+本地 Diff 可以从 stdin 或 UTF-8 文件审查：
+
+```powershell
+git diff | agentic-review review
+agentic-review review change.diff
+```
+
+自动化场景使用稳定的 JSON 合约：
+
+```powershell
+git diff | agentic-review review --format json
+```
+
+成功结果包含 `schema_version`、`status`、`reviewer`、`summary`、`files` 和
+`findings`；失败结果包含 `schema_version`、`status` 和
+`error.code`/`error.message`，同时返回非零退出码。JSON 模式只向 stdout
+写入 JSON，默认文本模式保持适合终端阅读的输出。
+
+GitHub Action 调用方应显式声明最小权限：
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
+
+Action 合约提供 `diff-path`、`mode`、`output-path` 和 `python-version` 输入，
+并通过 `report-path` 输出结构化报告路径。当前预览版执行 `fast` 模式；
+`deep` 已预留但会明确失败，待分阶段 Pipeline 和沙箱能力完成后开放。
+Action 不接收 GitHub token 输入，由调用工作流控制权限。
 
 打开 `http://127.0.0.1:8080/` 查看管理台，健康检查地址为 `http://127.0.0.1:8080/health`。本地开发默认关闭登录；需要启用登录时，在启动前设置 `EVOAGENT_AUTH_REQUIRED=true`、`EVOAGENT_AUTH_SECRET` 和管理员凭据。
 
@@ -83,7 +122,7 @@ Compose 默认只将 Web 服务绑定到 `127.0.0.1:8080`。
 
 ## 模型配置
 
-默认 `local` provider 使用确定性规则审查，不需要外部模型。需要多 Agent 模式时，选择一个 OpenAI Chat Completions 兼容 provider，并把密钥放在环境变量或本地 `.env` 中：
+配置继续兼容 `EVOAGENT_*` 环境变量前缀。默认 `local` provider 使用确定性规则审查，不需要外部模型。需要多 Agent 模式时，选择一个 OpenAI Chat Completions 兼容 provider，并把密钥放在环境变量或本地 `.env` 中：
 
 <details>
 <summary>DeepSeek / OpenRouter / 自定义端点</summary>
@@ -111,7 +150,23 @@ python -m evoagent
 
 ## GitHub Webhook
 
-接入方式是 GitHub Webhook + HTTPS 转发 + fine-grained PAT，不需要安装 GitHub App。服务接收 `opened`、`reopened` 和 `synchronize` 事件，并异步创建审查任务。
+推荐使用 GitHub App 接入多个仓库：安装令牌按安装范围签发，服务从 PR Webhook 的 `installation.id` 获取对应令牌。服务接收 `opened`、`reopened` 和 `synchronize` 事件，并异步创建审查任务。当前 Webhook 的 Agent 审查仍要求已配置模型；本地 CLI 的规则审查不受影响。
+
+1. 在 GitHub **Settings → Developer settings → GitHub Apps → New GitHub App** 注册 App。Webhook URL 填 `https://<公网域名>/webhooks/github`，启用 Webhook、设置随机 Secret，并订阅 **Pull request** 事件。仓库权限至少为 `Contents: Read`、`Pull requests: Read`；开启回写评论时将 `Pull requests` 提升为 `Write`。只有启用自动修复并确需创建分支/提交时，才增加 `Contents: Write`。按需要安装到指定仓库。
+2. 将生成的私钥文件保存在仓库之外，配置以下环境变量。Webhook Secret 与 GitHub App 私钥、登录密钥分别管理。
+
+```powershell
+$env:EVOAGENT_GITHUB_APP_ID = '<app-id>'
+$env:EVOAGENT_GITHUB_APP_SLUG = '<app-slug>'
+$env:EVOAGENT_GITHUB_PRIVATE_KEY_PATH = '<absolute-path-to-private-key.pem>'
+$env:EVOAGENT_GITHUB_WEBHOOK_SECRET = '<webhook-secret>'
+$env:EVOAGENT_PUBLIC_BASE_URL = 'https://<公网域名>'
+$env:EVOAGENT_AUTO_POST_REVIEW = 'true'
+```
+
+3. 启动服务后打开 `/github/install` 进入 GitHub 安装页。App 的 Setup URL 可以填 `https://<公网域名>/github/setup`；当前该回调仅记录 GitHub 传来的 installation ID，不验证该 ID 的所有权，因此不要把回调记录本身当作授权依据。实际 API 调用仍由 GitHub 安装令牌和仓库访问权限控制。
+
+本地单仓库试用也可以继续使用仓库 Webhook 与 fine-grained PAT：
 
 <details>
 <summary>配置 Webhook 和 PAT</summary>
