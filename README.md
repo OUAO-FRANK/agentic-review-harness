@@ -108,6 +108,22 @@ Action 不接收 GitHub token 输入，由调用工作流控制权限。
 
 服务也可以通过 `POST /v1/reviews` 接收 Diff，通过 `GET /v1/tasks/{id}/report` 获取 Markdown 报告。完整请求模型见 `evoagent/api.py`，README 不展开端点清单。
 
+## 变化规划基础
+
+Python API 可将 Diff 固定到 base/head SHA，筛除 vendor、generated、lock 和二进制文件，再为审查文件生成稳定的组 ID：
+
+```python
+from evoagent.review import ChangePlanner, ChangeSet, ReviewGroup
+
+diff = "--- a/src/app.py\n+++ b/src/app.py\n@@ -0,0 +1 @@\n+value = 1\n"
+change = ChangeSet.from_diff(diff, "a" * 40, "b" * 40)
+paths = [item.path for item in ChangePlanner().reviewable_files(change)]
+group = ReviewGroup.from_paths(change, paths, "source change")
+print(group.group_id, group.paths)
+```
+
+当前该 API 负责不可变变化模型、文件过滤和稳定身份；自动分组与预算控制尚未接入审查流水线。
+
 ## Docker Compose
 
 需要 PostgreSQL、Redis 和 Web 服务时，复制示例配置并填写必需密钥：
