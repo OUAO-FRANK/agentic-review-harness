@@ -110,19 +110,18 @@ Action 不接收 GitHub token 输入，由调用工作流控制权限。
 
 ## 变化规划基础
 
-Python API 可将 Diff 固定到 base/head SHA，筛除 vendor、generated、lock 和二进制文件，再为审查文件生成稳定的组 ID：
+Python API 可将 Diff 固定到 base/head SHA，筛除 vendor、generated、lock 和二进制文件，确定性地将同名源码与测试配对，并按文件数和估算 Token 上限分组：
 
 ```python
-from evoagent.review import ChangePlanner, ChangeSet, ReviewGroup
+from evoagent.review import ChangePlanner, ChangeSet
 
 diff = "--- a/src/app.py\n+++ b/src/app.py\n@@ -0,0 +1 @@\n+value = 1\n"
 change = ChangeSet.from_diff(diff, "a" * 40, "b" * 40)
-paths = [item.path for item in ChangePlanner().reviewable_files(change)]
-group = ReviewGroup.from_paths(change, paths, "source change")
-print(group.group_id, group.paths)
+groups = ChangePlanner(max_files=2, max_tokens=256).plan(change)
+print([(group.group_id, group.paths, group.token_budget) for group in groups])
 ```
 
-当前该 API 负责不可变变化模型、文件过滤和稳定身份；自动分组与预算控制尚未接入审查流水线。
+当前估算按每条新增行 32 Token 计算；单文件超限时产生标记为 `oversized-file` 的独立组，后续上下文构建仍须裁剪内容。此 Python API 尚未接入审查流水线。
 
 ## Docker Compose
 
