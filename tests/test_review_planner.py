@@ -41,6 +41,16 @@ diff --git a/tests/test_app.py b/tests/test_app.py
 """
 
 
+def change_for(paths, added_lines=1):
+    diff = ""
+    for path in paths:
+        diff += "--- a/%s\n+++ b/%s\n@@ -0,0 +1,%d @@\n" % (
+            path, path, added_lines
+        )
+        diff += "+value\n" * added_lines
+    return ChangeSet.from_diff(diff, BASE, HEAD)
+
+
 class ReviewPlannerTests(unittest.TestCase):
     def test_change_set_is_immutable_and_records_added_lines(self):
         change = ChangeSet.from_diff(DIFF, BASE, HEAD)
@@ -81,6 +91,46 @@ class ReviewPlannerTests(unittest.TestCase):
             ReviewGroup.from_paths(change, ["src/unknown.py"], "module")
         with self.assertRaises(ValueError):
             ReviewGroup.from_paths(change, ["src/app.py", "src/app.py"], "module")
+
+    def test_planner_pairs_source_with_test_and_covers_files_once(self):
+        paths = ["tests/test_parser.py", "src/parser.py", "src/cache.py", "vendor/skip.py"]
+        first = ChangePlanner(max_files=2, max_tokens=256).plan(change_for(paths))
+        second = ChangePlanner(max_files=2, max_tokens=256).plan(change_for(reversed(paths)))
+        self.assertEqual([group.group_id for group in first], [group.group_id for group in second])
+        self.assertEqual(
+            {"src/cache.py", "src/parser.py", "tests/test_parser.py"},
+            {path for group in first for path in group.paths},
+        )
+        self.assertEqual(3, sum(len(group.paths) for group in first))
+        self.assertTrue(any(
+            group.paths == ("src/parser.py", "tests/test_parser.py") for group in first
+        ))
+
+    def test_planner_respects_file_and_token_limits(self):
+        paths = ["src/a.py", "src/b.py", "src/c.py", "src/d.py"]
+        groups = ChangePlanner(max_files=2, max_tokens=64).plan(change_for(paths))
+        self.assertEqual(2, len(groups))
+        self.assertTrue(all(len(group.paths) <= 2 for group in groups))
+        self.assertTrue(all(group.estimated_tokens <= group.token_budget for group in groups))
+        self.assertEqual({"src/a.py", "src/b.py", "src/c.py", "src/d.py"}, {
+            path for group in groups for path in group.paths
+        })
+
+    def test_oversized_file_uses_singleton_budget_fallback(self):
+        groups = ChangePlanner(max_files=2, max_tokens=64).plan(
+            change_for(["src/large.py", "src/small.py"], added_lines=4)
+        )
+        self.assertEqual(2, len(groups))
+        self.assertEqual(("src/large.py",), groups[0].paths)
+        self.assertEqual("oversized-file", groups[0].reason)
+        self.assertEqual(64, groups[0].token_budget)
+        self.assertGreater(groups[0].estimated_tokens, groups[0].token_budget)
+
+    def test_planner_rejects_invalid_limits(self):
+        with self.assertRaises(ValueError):
+            ChangePlanner(max_files=0)
+        with self.assertRaises(ValueError):
+            ChangePlanner(max_tokens=0)
 
 
 if __name__ == "__main__":

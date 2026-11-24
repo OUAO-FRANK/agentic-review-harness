@@ -58,10 +58,13 @@ class ReviewGroup:
     head_sha: str
     paths: tuple[str, ...]
     reason: str
+    token_budget: int = 0
+    estimated_tokens: int = 0
 
     @classmethod
     def from_paths(
-        cls, change: ChangeSet, paths: Iterable[str], reason: str
+        cls, change: ChangeSet, paths: Iterable[str], reason: str,
+        token_budget: int = 0, estimated_tokens: int = 0,
     ) -> "ReviewGroup":
         selected = tuple(paths)
         if not selected or len(selected) != len(set(selected)):
@@ -75,4 +78,4 @@ class ReviewGroup:
         identity = hashlib.sha256(
             (change.head_sha + "\0" + "\0".join(ordered)).encode("utf-8")
         ).hexdigest()[:16]
-        return cls(identity, change.head_sha, ordered, reason)
+        return cls(identity, change.head_sha, ordered, reason, token_budget, estimated_tokens)
