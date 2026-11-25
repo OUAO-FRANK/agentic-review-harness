@@ -27,15 +27,17 @@ CONFIG_NAMES = {
 }
 
 
-def read_python_source(root: Path, path: str) -> str:
-    """Read a repository-relative Python source file with its declared encoding."""
+def read_repository_source(root: Path, path: str) -> str:
+    """Read repository-relative source, respecting Python encoding declarations."""
     relative = Path(path)
     if relative.anchor:
         raise ValueError("expected a repository-relative path")
     target = (root / relative).resolve(strict=True)
     target.relative_to(root)
-    with tokenize.open(target) as source:
-        return source.read()
+    if relative.suffix.lower() == ".py":
+        with tokenize.open(target) as source:
+            return source.read()
+    return target.read_text(encoding="utf-8-sig")
 
 
 def _evidence(tool: str, payload: Any) -> Dict[str, Any]:
@@ -250,7 +252,7 @@ class RepositoryToolSuite:
             })
         return _evidence("ast_analyze", {
             "path": path, "valid": None,
-            "note": "Tree-sitter is not installed; non-Python AST analysis is unavailable.",
+            "note": "This tool reports Python AST summaries. Use ContextBuilder for other languages.",
         })
 
     def git_context(self, path: str, line: int = 1) -> dict:
