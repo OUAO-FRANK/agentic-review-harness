@@ -1,4 +1,4 @@
-"""Build auditable Python source context for a review group."""
+"""Build auditable source context for a review group."""
 
 import ast
 import hashlib
@@ -6,8 +6,25 @@ from io import StringIO
 from pathlib import Path
 
 from ..context_manager import estimate_tokens
-from ..repository_tools import read_python_source
+from ..repository_tools import read_repository_source
+from .tree_sitter_context import tree_sitter_spans
 from .types import ChangeSet, ContextBundle, ContextItem, ReviewGroup
+
+
+def _enclosing_span(symbols: list[tuple[int, int]], line: int) -> tuple[int, int] | None:
+    return next(((start, end) for start, end in symbols if start <= line <= end), None)
+
+
+def _changed_symbol_spans(
+    symbols: list[tuple[int, int]], changed_lines: list[int],
+) -> dict[tuple[int, int], list[int]]:
+    symbols.sort(key=lambda span: (span[1] - span[0], span[0]))
+    changed_spans: dict[tuple[int, int], list[int]] = {}
+    for line in changed_lines:
+        span = _enclosing_span(symbols, line)
+        if span is not None:
+            changed_spans.setdefault(span, []).append(line)
+    return changed_spans
 
 
 def _python_spans(
@@ -29,16 +46,7 @@ def _python_spans(
                 while not lines[start - 1].lstrip().startswith("@"):
                     start -= 1
             symbols.append((start, node.end_lineno or node.lineno))
-    symbols.sort(key=lambda span: (span[1] - span[0], span[0]))
-
-    def enclosing_span(line: int) -> tuple[int, int] | None:
-        return next(((start, end) for start, end in symbols if start <= line <= end), None)
-
-    changed_spans: dict[tuple[int, int], list[int]] = {}
-    for line in changed_lines:
-        span = enclosing_span(line)
-        if span is not None:
-            changed_spans.setdefault(span, []).append(line)
+    changed_spans = _changed_symbol_spans(symbols, changed_lines)
     changed = set(changed_lines)
     names = {
         node.id for node in nodes
@@ -51,24 +59,25 @@ def _python_spans(
         if not isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
         referenced = any((alias.asname or alias.name.split(".")[0]) in names for alias in node.names)
-        scope = enclosing_span(node.lineno)
+        scope = _enclosing_span(symbols, node.lineno)
         if scope is None or (referenced and any(scope[0] <= line <= scope[1] for line in changed_lines)):
             reason = "direct-import" if referenced else "module-import"
             imports.append((node.lineno, node.end_lineno or node.lineno, reason))
     return changed_spans, imports
 
 
-def _item(path: str, lines: list[str], start: int, end: int, reason: str) -> ContextItem:
+def _item(
+    path: str, lines: list[str], start: int, end: int, reason: str, tool: str = "source-line",
+) -> ContextItem:
     content = "".join(lines[start - 1:end])
     return ContextItem(
-        path, start, end, content, reason,
-        "source-line" if reason == "changed-line" else "python-ast",
+        path, start, end, content, reason, tool,
         estimate_tokens(content), hashlib.sha256(content.encode("utf-8")).hexdigest(),
     )
 
 
 class ContextBuilder:
-    """Read Python snippets from the supplied checkout of the change's head."""
+    """Read source snippets from the supplied checkout of the change's head."""
 
     def __init__(self, repository_root: str | Path, change: ChangeSet):
         self.root = Path(repository_root).resolve()
@@ -113,26 +122,36 @@ class ContextBuilder:
             if total == budget:
                 break
             added = files[path].added_lines
-            if not added or not path.endswith(".py"):
+            if not added:
                 continue
             try:
-                source = read_python_source(self.root, path)
+                source = read_repository_source(self.root, path)
             except (OSError, ValueError, RuntimeError, SyntaxError):
+                continue
+            if "\x00" in source:
                 continue
             lines = list(StringIO(source))
             changed_lines = sorted({line for line in added if 1 <= line <= len(lines)})
             if not changed_lines:
                 continue
-            changed_spans, dependency_spans = _python_spans(source, path, lines, changed_lines)
+            suffix = Path(path).suffix.lower()
+            if suffix == ".py":
+                changed_spans, dependency_spans = _python_spans(source, path, lines, changed_lines)
+                tool = "python-ast"
+            else:
+                symbols, module_imports = tree_sitter_spans(source, suffix)
+                changed_spans = _changed_symbol_spans(symbols, changed_lines)
+                dependency_spans = [(start, end, "module-import") for start, end in module_imports]
+                tool = "tree-sitter"
             for (start, end), anchors in sorted(changed_spans.items()):
-                if not keep(_item(path, lines, start, end, "changed-symbol")):
+                if not keep(_item(path, lines, start, end, "changed-symbol", tool)):
                     fallback_lines.extend(_item(path, lines, line, line, "changed-line") for line in anchors)
             enclosed = {line for anchors in changed_spans.values() for line in anchors}
             fallback_lines.extend(
                 _item(path, lines, line, line, "changed-line")
                 for line in changed_lines if line not in enclosed
             )
-            imports.extend(_item(path, lines, start, end, reason) for start, end, reason in dependency_spans)
+            imports.extend(_item(path, lines, start, end, reason, tool) for start, end, reason in dependency_spans)
 
         for item in fallback_lines:
             keep(item)

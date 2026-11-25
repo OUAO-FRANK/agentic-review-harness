@@ -122,7 +122,7 @@ groups = ChangePlanner(max_files=2, max_tokens=256).plan(change)
 print([(group.group_id, group.paths, group.token_budget) for group in groups])
 ```
 
-分组按每条新增行 32 Token 估算，单文件超限时标记为 `oversized-file`。可以从 PR head 对应的源码目录为每组构建 Python 上下文：
+分组按每条新增行 32 Token 估算，单文件超限时标记为 `oversized-file`。可以从 PR head 对应的源码目录为每组构建上下文：
 
 ```python
 from pathlib import Path
@@ -138,7 +138,7 @@ with TemporaryDirectory() as checkout:
     print(bundle.total_tokens, [(item.path, item.reason, item.content_hash) for item in bundle.items])
 ```
 
-每条上下文记录路径、行范围、原文、选择理由、提取方法、估算 Token 和 SHA-256。构建器优先保留变更所在的 Python 符号，再纳入 import 语句，按静态名称引用优先选取。它按内容哈希去重，并以分组和调用方指定的较低预算为上限。整个符号放不下时按完整变更行选取。当前可通过 Python API 调用。
+每条上下文记录路径、行范围、原文、选择理由、提取方法、估算 Token 和 SHA-256。构建器优先保留变更所在的符号，再补充 import。Python 按静态名称引用优先选取 import。JavaScript 和 TypeScript（含 JSX/TSX）提取静态 import，Go 提取 import 声明。构建器按内容哈希去重，并以分组和调用方指定的较低预算为上限。语法解析失败、扩展名未知或完整符号超预算时，构建器尝试保留预算内的完整变更行。当前可通过 Python API 调用。
 
 ## Docker Compose
 

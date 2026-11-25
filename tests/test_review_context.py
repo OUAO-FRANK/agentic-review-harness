@@ -136,13 +136,120 @@ class ContextBuilderTest(unittest.TestCase):
         self.assertEqual([(item.start_line, item.content) for item in bundle.items],
                          [(1, first + "\n"), (2, second + "\n")])
 
-    def test_zero_budget_and_non_python_or_unavailable_paths(self):
+    def test_extracts_javascript_typescript_and_go_symbols_and_imports(self):
+        js_import = 'import {format} from "./format.js";\n'
+        js_symbol = '  function inner() {\n    return format(`值 = }`);\n  }\n'
+        ts_import = 'import type { Item } from "./item";\n'
+        ts_symbol = "export const run = <T extends Item>(item: T): T => {\n  return item;\n};\n"
+        go_import = 'import (\n    f "fmt"\n)\n'
+        go_symbol = 'func (c Counter) Label() string {\n    return f.Sprint("值")\n}\n'
+        cases = [
+            ("nested.js", js_import + "function outer() {\n" + js_symbol + "}\n",
+             4, (3, 5, js_symbol), (1, 1, js_import)),
+            ("generic.ts", ts_import + "\n" + ts_symbol,
+             4, (3, 5, ts_symbol), (1, 1, ts_import)),
+            ("counter.go", "package demo\n\n" + go_import + "\n" + go_symbol,
+             8, (7, 9, go_symbol), (3, 5, go_import)),
+        ]
+        for path, source, line, symbol, dependency in cases:
+            with self.subTest(path=path):
+                self.write(path, source)
+                builder, group = self.context({path: (line,)})
+                bundle = builder.build(group, token_budget=240)
+                self.assertEqual(
+                    [(item.start_line, item.end_line, item.content) for item in bundle.items],
+                    [symbol, dependency],
+                )
+                self.assertEqual([item.reason for item in bundle.items], ["changed-symbol", "module-import"])
+                self.assertEqual([item.tool for item in bundle.items], ["tree-sitter", "tree-sitter"])
+                self.assertTrue(all(item.path == path for item in bundle.items))
+
+    def test_tsx_uses_its_own_grammar(self):
+        source = "export function View() {\n  return <span>界面</span>;\n}\n"
+        self.write("view.tsx", source)
+        builder, group = self.context({"view.tsx": (2,)})
+
+        bundle = builder.build(group, token_budget=240)
+        self.assertEqual([(item.content, item.tool) for item in bundle.items], [(source, "tree-sitter")])
+
+    def test_extracts_anonymous_default_exports(self):
+        for signature in ("export default () => {", "export default function () {"):
+            with self.subTest(signature=signature):
+                source = signature + "\n  return 1;\n}\n"
+                self.write("default.js", source)
+                builder, group = self.context({"default.js": (2,)})
+
+                bundle = builder.build(group, token_budget=240)
+                self.assertEqual([(item.content, item.tool) for item in bundle.items], [(source, "tree-sitter")])
+
+    def test_keeps_typescript_method_decorators_and_import_aliases(self):
+        import_line = "import Item = Models.Item;\n"
+        method = '  @route("/items")\n  // List items.\n  list(value: Item) {\n    return value;\n  }\n'
+        self.write("handler.ts", import_line + "class Handler {\n" + method + "}\n")
+        builder, group = self.context({"handler.ts": (3, 6)})
+
+        bundle = builder.build(group, token_budget=240)
+        self.assertEqual(
+            [(item.start_line, item.end_line, item.content) for item in bundle.items],
+            [(3, 7, method), (1, 1, import_line)],
+        )
+
+    def test_extracts_typescript_declaration_file_signatures(self):
+        source = "export declare function run(\n  value: string,\n): void;\n"
+        self.write("types.d.ts", source)
+        builder, group = self.context({"types.d.ts": (2,)})
+
+        bundle = builder.build(group, token_budget=240)
+        self.assertEqual([(item.content, item.tool) for item in bundle.items], [(source, "tree-sitter")])
+
+    def test_bad_syntax_and_unknown_extensions_use_only_changed_text(self):
+        cases = [
+            ("broken.js", 'import "./valid.js";\n', "export function broken( {\n"),
+            ("broken.ts", 'import type { T } from "./type";\n', "interface Broken { value: =\n"),
+            ("broken.go", 'package demo\nimport "fmt"\n', "func broken( {\n"),
+            ("notes.txt", "before\n", "变更内容\n"),
+        ]
+        for path, prefix, changed_line in cases:
+            with self.subTest(path=path):
+                (self.root / path).write_bytes((prefix + changed_line).replace("\n", "\r\n").encode("utf-8"))
+                line = prefix.count("\n") + 1
+                diff = f"--- a/{path}\r\n+++ b/{path}\r\n@@ -{line - 1},0 +{line} @@\r\n+{changed_line}"
+                change = ChangeSet.from_diff(diff, "a" * 40, "b" * 40)
+                group = ReviewGroup.from_paths(change, (path,), "test")
+                builder = ContextBuilder(self.root, change)
+
+                bundle = builder.build(group, token_budget=240)
+                self.assertEqual(
+                    [(item.start_line, item.end_line, item.content, item.reason, item.tool) for item in bundle.items],
+                    [(line, line, changed_line, "changed-line", "source-line")],
+                )
+                self.assertEqual(builder.build(group, token_budget=240), bundle)
+                budget = estimate_tokens(changed_line)
+                self.assertEqual(bundle.total_tokens, budget)
+                self.assertEqual(builder.build(group, token_budget=budget - 1).items, ())
+
+    def test_mixed_language_group_deduplicates_and_respects_its_budget(self):
+        source = "function run() {\n  return '结果';\n}\n"
+        for path in ("a.js", "b.ts"):
+            self.write(path, source)
+        budget = estimate_tokens(source)
+        builder, group = self.context({"b.ts": (2,), "a.js": (2,)}, group_budget=budget * 2)
+
+        bundle = builder.build(group, token_budget=240)
+        self.assertEqual(bundle.token_budget, budget * 2)
+        self.assertEqual(bundle.total_tokens, budget)
+        self.assertEqual([(item.path, item.content) for item in bundle.items], [("a.js", source)])
+        self.assertEqual(bundle.items[0].content_hash, hashlib.sha256(source.encode("utf-8")).hexdigest())
+        self.assertLessEqual(builder.build(group, token_budget=budget - 1).total_tokens, budget - 1)
+
+    def test_zero_budget_and_unavailable_or_binary_paths(self):
         self.write("deleted.py", "something = 1\n")
-        self.write("module.js", "export function run() {}\n")
+        (self.root / "data.bin").write_bytes(b"binary\x00payload\n")
+        (self.root / "bad-encoding.ts").write_bytes(b"\xff\n")
         self.write("invalid.py", "def missing(\n")
         self.write("../outside.py", "value = 1\n")
         builder, group = self.context({
-            "deleted.py": (), "module.js": (1,), "invalid.py": (1,), "missing.py": (1,),
+            "deleted.py": (), "data.bin": (1,), "bad-encoding.ts": (1,), "invalid.py": (1,), "missing.py": (1,),
             "../outside.py": (1,),
         })
 
