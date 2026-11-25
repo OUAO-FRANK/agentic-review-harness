@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from io import StringIO
 from typing import List
 
 from .models import ChangedLine
@@ -21,7 +22,8 @@ def parse_unified_diff(diff: str) -> ParsedDiff:
     new_line = 0
     in_hunk = False
 
-    for raw in diff.splitlines():
+    for line in StringIO(diff, newline=None):
+        raw = line.removesuffix("\n")
         if raw.startswith("+++ "):
             current_path = raw[4:].strip()
             if current_path.startswith("b/"):
