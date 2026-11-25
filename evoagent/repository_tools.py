@@ -11,6 +11,7 @@ import sys
 import tempfile
 import shlex
 import time
+import tokenize
 from typing import Any, Dict, Iterable, List, Optional, Set
 
 from .diff_parser import ParsedDiff
@@ -24,6 +25,17 @@ CONFIG_NAMES = {
     "poetry.lock", "Pipfile", "Dockerfile", "docker-compose.yml", ".github",
     "CODEOWNERS", "Cargo.toml", "go.mod", "pom.xml", "build.gradle",
 }
+
+
+def read_python_source(root: Path, path: str) -> str:
+    """Read a repository-relative Python source file with its declared encoding."""
+    relative = Path(path)
+    if relative.anchor:
+        raise ValueError("expected a repository-relative path")
+    target = (root / relative).resolve(strict=True)
+    target.relative_to(root)
+    with tokenize.open(target) as source:
+        return source.read()
 
 
 def _evidence(tool: str, payload: Any) -> Dict[str, Any]:

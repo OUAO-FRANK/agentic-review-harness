@@ -3,6 +3,7 @@
 import hashlib
 import re
 from dataclasses import dataclass
+from io import StringIO
 from typing import Iterable
 
 from ..diff_parser import parse_unified_diff
@@ -29,7 +30,7 @@ class ChangeSet:
             raise ValueError("base_sha and head_sha must be 40-character hex SHAs")
         paths: list[str] = []
         old_path = ""
-        for line in diff.splitlines():
+        for line in StringIO(diff, newline=None):
             if line.startswith("--- "):
                 old_path = line[4:].strip()
             elif line.startswith("+++ "):
@@ -79,3 +80,24 @@ class ReviewGroup:
             (change.head_sha + "\0" + "\0".join(ordered)).encode("utf-8")
         ).hexdigest()[:16]
         return cls(identity, change.head_sha, ordered, reason, token_budget, estimated_tokens)
+
+
+@dataclass(frozen=True)
+class ContextItem:
+    path: str
+    start_line: int
+    end_line: int
+    content: str
+    reason: str
+    tool: str
+    estimated_tokens: int
+    content_hash: str
+
+
+@dataclass(frozen=True)
+class ContextBundle:
+    group_id: str
+    head_sha: str
+    token_budget: int
+    total_tokens: int
+    items: tuple[ContextItem, ...]

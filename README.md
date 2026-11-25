@@ -115,13 +115,30 @@ Python API 可将 Diff 固定到 base/head SHA，筛除 vendor、generated、loc
 ```python
 from evoagent.review import ChangePlanner, ChangeSet
 
-diff = "--- a/src/app.py\n+++ b/src/app.py\n@@ -0,0 +1 @@\n+value = 1\n"
+source = "import math\n\ndef circumference(radius):\n    return math.tau * radius\n"
+diff = "--- a/src/app.py\n+++ b/src/app.py\n@@ -3,0 +4 @@\n+    return math.tau * radius\n"
 change = ChangeSet.from_diff(diff, "a" * 40, "b" * 40)
 groups = ChangePlanner(max_files=2, max_tokens=256).plan(change)
 print([(group.group_id, group.paths, group.token_budget) for group in groups])
 ```
 
-当前估算按每条新增行 32 Token 计算；单文件超限时产生标记为 `oversized-file` 的独立组，后续上下文构建仍须裁剪内容。此 Python API 尚未接入审查流水线。
+分组按每条新增行 32 Token 估算，单文件超限时标记为 `oversized-file`。可以从 PR head 对应的源码目录为每组构建 Python 上下文：
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from evoagent.review import ContextBuilder
+
+with TemporaryDirectory() as checkout:
+    app = Path(checkout) / "src/app.py"
+    app.parent.mkdir()
+    app.write_text(source, encoding="utf-8")
+    bundle = ContextBuilder(checkout, change).build(groups[0], token_budget=120)
+    print(bundle.total_tokens, [(item.path, item.reason, item.content_hash) for item in bundle.items])
+```
+
+每条上下文记录路径、行范围、原文、选择理由、提取方法、估算 Token 和 SHA-256。构建器优先保留变更所在的 Python 符号，再纳入 import 语句，按静态名称引用优先选取。它按内容哈希去重，并以分组和调用方指定的较低预算为上限。整个符号放不下时按完整变更行选取。当前可通过 Python API 调用。
 
 ## Docker Compose
 
