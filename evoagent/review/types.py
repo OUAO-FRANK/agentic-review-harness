@@ -3,10 +3,9 @@
 import hashlib
 import re
 from dataclasses import dataclass
-from io import StringIO
 from typing import Iterable
 
-from ..diff_parser import parse_unified_diff
+from ..diff_parser import iter_diff_lines, parse_unified_diff
 
 
 _SHA = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -30,11 +29,13 @@ class ChangeSet:
             raise ValueError("base_sha and head_sha must be 40-character hex SHAs")
         paths: list[str] = []
         old_path = ""
-        for line in StringIO(diff, newline=None):
-            if line.startswith("--- "):
-                old_path = line[4:].strip()
-            elif line.startswith("+++ "):
-                new_path = line[4:].strip()
+        for kind, line in iter_diff_lines(diff):
+            if kind == "boundary":
+                old_path = ""
+            elif kind == "old-file":
+                old_path = line[4:].strip().split("\t", 1)[0]
+            elif kind == "new-file":
+                new_path = line[4:].strip().split("\t", 1)[0]
                 path = old_path if new_path == "/dev/null" else new_path
                 if path.startswith(("a/", "b/")):
                     path = path[2:]

@@ -13,11 +13,8 @@ import re
 import threading
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from .diff_parser import HUNK_HEADER, iter_diff_lines
 
-HUNK_HEADER = re.compile(
-    r"^@@\s+-(?P<old>\d+)(?:,(?P<old_count>\d+))?\s+"
-    r"\+(?P<new>\d+)(?:,(?P<new_count>\d+))?\s+@@(?P<label>.*)$"
-)
 SYMBOL = re.compile(
     r"(?:def|class|function|func|interface|type)\s+([A-Za-z_$][A-Za-z0-9_$]*)"
 )
@@ -78,11 +75,11 @@ class DiffHunk:
 
     @property
     def added(self) -> int:
-        return sum(line.startswith("+") and not line.startswith("+++") for line in self.lines)
+        return sum(line.startswith("+") for line in self.lines)
 
     @property
     def deleted(self) -> int:
-        return sum(line.startswith("-") and not line.startswith("---") for line in self.lines)
+        return sum(line.startswith("-") for line in self.lines)
 
 
 class ContextManager:
@@ -141,8 +138,8 @@ class ContextManager:
         lowered = diff.lower()
         signals = [name for name, _weight, needles in RISK_SIGNALS if any(n in lowered for n in needles)]
         identifiers = []
-        for line in diff.splitlines():
-            if not line.startswith("+") or line.startswith("+++"):
+        for kind, line in iter_diff_lines(diff):
+            if kind != "body" or not line.startswith("+"):
                 continue
             identifiers.extend(WORD.findall(line[1:]))
             if len(identifiers) >= 80:
@@ -393,23 +390,25 @@ class ContextManager:
                     len(hunks), path or "unknown", header, tuple(lines), old_start, new_start,
                 ))
 
-        for raw in diff.splitlines():
-            if raw.startswith("+++ "):
+        for kind, raw in iter_diff_lines(diff):
+            if kind in {"boundary", "old-file", "new-file"}:
                 flush()
                 header = ""
                 lines = []
-                value = raw[4:].strip().split("\t", 1)[0]
-                path = value[2:] if value.startswith("b/") else value
-                continue
-            match = HUNK_HEADER.match(raw)
-            if match:
+                if kind == "boundary":
+                    path = ""
+                elif kind == "new-file":
+                    value = raw[4:].strip().split("\t", 1)[0]
+                    path = value[2:] if value.startswith("b/") else value
+            elif kind == "hunk":
                 flush()
                 header = raw
                 lines = []
+                match = HUNK_HEADER.match(raw)
+                assert match is not None
                 old_start = int(match.group("old"))
                 new_start = int(match.group("new"))
-                continue
-            if header:
+            elif kind == "body" and header:
                 lines.append(raw)
         flush()
         if not hunks and diff.strip():

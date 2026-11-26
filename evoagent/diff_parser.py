@@ -1,4 +1,5 @@
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from io import StringIO
 from typing import List
@@ -12,7 +13,70 @@ class ParsedDiff:
     added_lines: List[ChangedLine]
 
 
-HUNK = re.compile(r"^@@ -(?:\d+)(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+HUNK_HEADER = re.compile(
+    r"^@@\s+-(?P<old>\d+)(?:,(?P<old_count>\d+))?\s+"
+    r"\+(?P<new>\d+)(?:,(?P<new_count>\d+))?\s+@@(?P<label>.*)$"
+)
+_NO_NEWLINE = "\\ No newline at end of file"
+
+
+def iter_diff_lines(diff: str, *, strict: bool = False) -> Iterator[tuple[str, str]]:
+    """Separate patch headers from hunk body lines that happen to look like headers."""
+    in_hunk = False
+    old_remaining = new_remaining = 0
+    pending_file = active_file = False
+    for position, line in enumerate(StringIO(diff, newline=None), 1):
+        raw = line.removesuffix("\n")
+        if in_hunk:
+            if raw == _NO_NEWLINE:
+                yield "body", raw
+                continue
+            old_line = int(raw.startswith((" ", "-")))
+            new_line = int(raw.startswith((" ", "+")))
+            file_header = raw.startswith(("--- ", "+++ "))
+            if (old_line or new_line) and (
+                (old_line <= old_remaining and new_line <= new_remaining)
+                or (not strict and not file_header)
+            ):
+                old_remaining = max(0, old_remaining - old_line)
+                new_remaining = max(0, new_remaining - new_line)
+                yield "body", raw
+                continue
+            if strict and (
+                old_remaining or new_remaining
+                or ((old_line or new_line) and not raw.startswith("--- "))
+            ):
+                raise ValueError(f"invalid unified diff hunk at input line {position}")
+            in_hunk = False
+            old_remaining = new_remaining = 0
+
+        if raw.startswith("diff --git "):
+            if strict and pending_file:
+                raise ValueError(f"incomplete unified diff file headers at input line {position}")
+            pending_file = active_file = False
+            yield "boundary", raw
+        elif raw.startswith("--- "):
+            if strict and pending_file:
+                raise ValueError(f"incomplete unified diff file headers at input line {position}")
+            pending_file, active_file = True, False
+            yield "old-file", raw
+        elif raw.startswith("+++ "):
+            if strict and not pending_file:
+                raise ValueError(f"missing unified diff old file header at input line {position}")
+            pending_file, active_file = False, True
+            yield "new-file", raw
+        elif match := HUNK_HEADER.match(raw):
+            if strict and not active_file:
+                raise ValueError(f"missing file headers for unified diff hunk at input line {position}")
+            old_remaining = int(match["old_count"] or "1")
+            new_remaining = int(match["new_count"] or "1")
+            in_hunk = True
+            yield "hunk", raw
+
+    if strict and (old_remaining or new_remaining):
+        raise ValueError("truncated unified diff hunk at end of input")
+    if strict and pending_file:
+        raise ValueError("incomplete unified diff file headers at end of input")
 
 
 def parse_unified_diff(diff: str) -> ParsedDiff:
@@ -20,34 +84,24 @@ def parse_unified_diff(diff: str) -> ParsedDiff:
     added: List[ChangedLine] = []
     current_path = ""
     new_line = 0
-    in_hunk = False
-
-    for line in StringIO(diff, newline=None):
-        raw = line.removesuffix("\n")
-        if raw.startswith("+++ "):
-            current_path = raw[4:].strip()
+    for kind, raw in iter_diff_lines(diff):
+        if kind == "boundary":
+            current_path = ""
+        elif kind == "new-file":
+            current_path = raw[4:].strip().split("\t", 1)[0]
             if current_path.startswith("b/"):
                 current_path = current_path[2:]
             if current_path != "/dev/null" and current_path not in files:
                 files.append(current_path)
-            in_hunk = False
-            continue
-        match = HUNK.match(raw)
-        if match:
-            new_line = int(match.group(1))
-            in_hunk = True
-            continue
-        if not in_hunk:
-            continue
-        if raw.startswith("+") and not raw.startswith("+++"):
-            added.append(ChangedLine(current_path or "unknown", new_line, raw[1:]))
-            new_line += 1
-        elif raw.startswith("-") and not raw.startswith("---"):
-            continue
-        elif raw.startswith("\\ No newline"):
-            continue
-        else:
-            new_line += 1
+        elif kind == "hunk":
+            match = HUNK_HEADER.match(raw)
+            assert match is not None
+            new_line = int(match["new"])
+        elif kind == "body":
+            if raw.startswith("+"):
+                added.append(ChangedLine(current_path or "unknown", new_line, raw[1:]))
+            if raw.startswith(("+", " ")):
+                new_line += 1
 
     return ParsedDiff(files=files, added_lines=added)
 

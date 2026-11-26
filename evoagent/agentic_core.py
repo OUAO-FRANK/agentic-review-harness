@@ -1,5 +1,6 @@
 """Hierarchical four-role review engine with a Lead and bounded worker roles."""
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict
 import ast
 import hashlib
 import json
@@ -17,6 +18,8 @@ from .llm import JsonChatClient
 from .models import ComponentKind, Finding, Severity
 from .modes import component, resolve_mode
 from .repository_tools import RepositoryToolSuite
+from .review.pipeline import ReviewPipeline
+from .review.types import ChangeSet
 from .reviewer import LocalRuleReviewer, Reviewer
 from .runtime import AgentTool, RuntimeBudgetExceeded, ToolRegistry
 from .telemetry import ExecutionLedger
@@ -91,6 +94,7 @@ ROLE_PERMISSIONS = {
         "run_repository_checks",
     },
 }
+GROUP_DIFF_TOOLS = {"search_diff", "changed_line"}
 
 
 def _collect_evidence(observations: List[dict]) -> Dict[str, dict]:
@@ -290,6 +294,7 @@ class AgenticReviewer(Reviewer):
         memory_manager=None,
         context_manager: Optional[ContextManager] = None,
         skill_provider=None,
+        max_concurrent_groups: int = 2,
     ):
         self.store = store
         self.client = llm_client
@@ -314,6 +319,7 @@ class AgenticReviewer(Reviewer):
                 self.structured_config, ensure_ascii=False, sort_keys=True
             )
         self.gate = FindingGate()
+        self.pipeline = ReviewPipeline(max_concurrent_groups)
         self._summaries: Dict[str, dict] = {}
         self._memory_scopes: Dict[str, tuple] = {}
         self._memory_scope_lock = threading.Lock()
@@ -399,11 +405,25 @@ class AgenticReviewer(Reviewer):
             "context-manager", "memory_recalled", count=len(recalled),
             repository=repository, tenant_id=tenant_id,
         )
-        findings, collaboration, components = self._agentic(
-            task_id, diff, parsed, suite, ledger, enabled, scanners, memory_context,
-            available_skills, requested_skills,
+        base_sha, head_sha = task_input.get("base_sha"), task_input.get("head_sha")
+        change = ChangeSet.from_diff(diff, base_sha or "", head_sha or "") if base_sha or head_sha else None
+
+        def run_workers(groups, worker_diff, worker_parsed):
+            worker_suite = suite
+            if groups is not None:
+                ledger.trace("review-pipeline", "planned", groups=len(groups))
+                worker_suite = RepositoryToolSuite(
+                    root, worker_diff, worker_parsed, ledger, self.review_test_command,
+                )
+            return self._agentic(
+                task_id, worker_diff, worker_parsed, worker_suite, ledger, enabled, scanners, memory_context,
+                available_skills, requested_skills, groups=groups,
+            )
+
+        findings, collaboration, components, gated = self.pipeline.run(
+            diff, parsed, run_workers, self.gate, change,
+            repository_root=root if suite.repository_available else "",
         )
-        gated = self.gate.apply(findings, parsed)
         ledger.trace("evidence-gate", "completed", **gated.checks)
         self._persist_task_memory(
             task_id, tenant_id, repository, findings, gated,
@@ -495,7 +515,7 @@ class AgenticReviewer(Reviewer):
 
     def _agentic(
         self, task_id, diff, parsed, suite, ledger, enabled, scanners=None,
-        memory_context=None, available_skills=None, requested_skills=None,
+        memory_context=None, available_skills=None, requested_skills=None, groups=None,
     ):
         if "lead" not in enabled:
             raise ValueError("agentic mode requires the lead Agent")
@@ -554,6 +574,10 @@ class AgenticReviewer(Reviewer):
                 decision.get("delegations"), worker_roles, parsed.files,
                 set(available_skills), requested_skills,
             )
+            if groups is not None:
+                session["delegations"] = self._group_delegations(
+                    session["delegations"], groups, worker_roles, available_skills, requested_skills,
+                )
             session["lead_delegation"] = self._public_decision(decision)
             session["risk_level"] = self._normalize_risk_level(
                 decision.get("risk_level")
@@ -577,6 +601,7 @@ class AgenticReviewer(Reviewer):
             available_skills=available_skills,
             max_steps=3 if high_risk else 1,
             allow_tools=high_risk,
+            groups=groups,
         )
         session["phase"] = "workers-completed"
         self._save_lead_session(task_id, session, ledger)
@@ -629,6 +654,7 @@ class AgenticReviewer(Reviewer):
                 available_skills=available_skills,
                 max_steps=2,
                 allow_tools=True,
+                groups=groups,
             )
             for revision in revision_assignments:
                 key = revision["run_id"]
@@ -734,13 +760,16 @@ class AgenticReviewer(Reviewer):
             "critic_decisions": session["critic_decisions"],
             "stop_reason": session["stop_reason"],
         }
+        if groups is not None:
+            collaboration["review_groups"] = [asdict(scope.group) for scope in groups.values()]
+            collaboration["max_concurrent_groups"] = self.pipeline.workers.max_concurrent_groups
         components = session["scanner_components"] + [
             component(
                 ComponentKind.LLM_AGENT, name,
                 token_budget=self._token_budget(name),
                 time_budget_seconds=self.default_time_budget,
                 tool_permissions=(
-                    sorted(ROLE_PERMISSIONS[name])
+                    sorted(ROLE_PERMISSIONS[name] if groups is None else GROUP_DIFF_TOOLS)
                     if high_risk and name in {
                         "security", "correctness-reliability",
                     } else []
@@ -788,11 +817,11 @@ class AgenticReviewer(Reviewer):
             )
             return context
 
-        def sink(agent, observation):
+        def sink(_agent, observation):
             values = scope()
             if self.memory_manager is not None and values:
                 self.memory_manager.remember_observation(
-                    values[0], values[1], task_id, agent, observation,
+                    values[0], values[1], task_id, role, observation,
                 )
 
         return supplier, sink
@@ -912,7 +941,7 @@ class AgenticReviewer(Reviewer):
 
     def _run_pending_assignments(
         self, task_id, session, diff, parsed, suite, ledger, assignments, revision_round,
-        memory_context=None, available_skills=None, max_steps=3, allow_tools=True,
+        memory_context=None, available_skills=None, max_steps=3, allow_tools=True, groups=None,
     ):
         pending = [
             item for item in assignments
@@ -922,7 +951,7 @@ class AgenticReviewer(Reviewer):
         if not pending:
             return
 
-        def run(assignment):
+        def run(assignment, scope):
             worker = assignment["worker"]
             selected_skills = [
                 available_skills[name]
@@ -940,7 +969,8 @@ class AgenticReviewer(Reviewer):
                         skill.name, skill.instructions,
                     ) for skill in selected_skills
                 )
-            working_memory_supplier, observation_sink = self._memory_hooks(task_id, worker)
+            memory_role = worker if scope is None else f"{worker}:{scope.group.group_id}"
+            working_memory_supplier, observation_sink = self._memory_hooks(task_id, memory_role)
             role = BoundedRole(
                 worker, prompt, self.client,
                 self._token_budget(worker), self.default_time_budget,
@@ -953,7 +983,7 @@ class AgenticReviewer(Reviewer):
                 "lead_assignment": assignment,
                 "lead_feedback": assignment.get("lead_feedback", ""),
                 **self._model_diff(
-                    diff, task_id, "%s:assignment" % worker,
+                    diff if scope is None else scope.diff, task_id, "%s:assignment" % worker,
                     focus_files=assignment.get("files") or parsed.files,
                     risk_domains=assignment.get("risk_domains") or (),
                 ),
@@ -971,48 +1001,82 @@ class AgenticReviewer(Reviewer):
                     "evidence and address every required_evidence item."
                 ),
             }
-            tools = (
-                suite.registry(
-                    worker, self._skill_tool_permissions(worker, selected_skills)
-                ) if allow_tools else ToolRegistry()
-            )
+            if scope is not None:
+                context.update(
+                    changed_files=scope.parsed.files,
+                    scanner_findings=[
+                        finding for finding in session["scanner_findings"]
+                        if finding["path"] in scope.group.paths
+                    ],
+                    recalled_memory={"items": []},
+                    review_group=asdict(scope.group),
+                    context_bundle=asdict(scope.context) if scope.context is not None else None,
+                )
+            tools = ToolRegistry()
             if allow_tools:
+                allowed = self._skill_tool_permissions(worker, selected_skills)
+                if scope is None:
+                    tools = suite.registry(worker, allowed)
+                elif allowed & GROUP_DIFF_TOOLS:
+                    group_suite = RepositoryToolSuite("", scope.diff, scope.parsed, ledger)
+                    tools = group_suite.registry(worker, allowed & GROUP_DIFF_TOOLS)
                 self._register_skill_resource_tool(tools, selected_skills)
             return role.run(
                 json.dumps(context, ensure_ascii=False),
                 tools, ledger,
             )
 
-        with ThreadPoolExecutor(max_workers=max(1, len(pending))) as pool:
-            futures = {pool.submit(run, item): item for item in pending}
-            for future in as_completed(futures):
-                assignment = futures[future]
-                run_id = str(assignment.get("run_id") or assignment["assignment_id"])
-                try:
-                    findings = _parse_findings(
-                        future.result(), parsed, assignment["worker"]
-                    )
-                    result = {
-                        "assignment_id": assignment["assignment_id"],
-                        "run_id": run_id, "worker": assignment["worker"],
-                        "revision_round": revision_round, "status": "completed",
-                        "findings": [item.to_dict() for item in findings], "error": "",
-                    }
-                except Exception as exc:
-                    result = {
-                        "assignment_id": assignment["assignment_id"],
-                        "run_id": run_id, "worker": assignment["worker"],
-                        "revision_round": revision_round, "status": "failed",
-                        "findings": [], "error": str(exc)[:1000],
-                    }
-                session["worker_results"][run_id] = result
+        def execute(assignment):
+            scope = groups[assignment["group_id"]] if groups is not None else None
+            run_id = str(assignment.get("run_id") or assignment["assignment_id"])
+            result = {
+                "assignment_id": assignment["assignment_id"], "run_id": run_id,
+                "worker": assignment["worker"], "revision_round": revision_round,
+            }
+            try:
+                findings = _parse_findings(
+                    run(assignment, scope), parsed if scope is None else scope.parsed, assignment["worker"],
+                )
+                result.update(status="completed", findings=[item.to_dict() for item in findings], error="")
+            except Exception as exc:
+                result.update(status="failed", findings=[], error=str(exc)[:1000])
+            return result
+
+        def save(results):
+            for result in results:
+                session["worker_results"][result["run_id"]] = result
                 ledger.trace(
                     "lead-session", "worker_reported",
-                    assignment_id=assignment["assignment_id"], run_id=run_id,
-                    worker=assignment["worker"], status=result["status"],
+                    assignment_id=result["assignment_id"], run_id=result["run_id"],
+                    worker=result["worker"], status=result["status"],
                     findings=len(result["findings"]), revision_round=revision_round,
                 )
                 self._save_lead_session(task_id, session, ledger)
+
+        if groups is None:
+            with ThreadPoolExecutor(max_workers=len(pending)) as pool:
+                futures = [pool.submit(execute, item) for item in pending]
+                save(future.result() for future in as_completed(futures))
+        else:
+            save(self.pipeline.workers.run(pending, execute))
+
+    def _group_delegations(self, assignments, groups, worker_roles, available_skills, requested_skills):
+        values = []
+        for group_id, scope in groups.items():
+            selected = []
+            for assignment in assignments:
+                paths = [path for path in scope.group.paths if path in assignment["files"]]
+                if paths:
+                    selected.append(dict(assignment, files=paths))
+            if not selected:
+                selected = self._normalize_delegations(
+                    None, worker_roles, scope.group.paths, available_skills, requested_skills,
+                )
+            values.extend(
+                dict(item, assignment_id=f"{group_id}:{item['assignment_id']}", group_id=group_id)
+                for item in selected
+            )
+        return values
 
     @staticmethod
     def _normalize_delegations(

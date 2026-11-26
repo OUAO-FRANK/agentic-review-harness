@@ -159,10 +159,15 @@ class ReviewHarness:
         else:
             collaboration = reviewer_summary or self._persisted_collaboration_summary(state["task_id"])
             run_mode, components, execution = {}, [], {}
+        groups = collaboration.get("review_groups")
+        reviewed_files = (
+            [path for group in groups for path in group["paths"]]
+            if groups is not None else parsed.files
+        )
         report = ReviewReport(
             repository=state["repository"], pull_request=state.get("pull_request"),
-            summary=self._summary(findings, len(parsed.files), risk), risk=risk,
-            findings=findings, files_reviewed=parsed.files, reviewer=self.reviewer.name,
+            summary=self._summary(findings, len(reviewed_files), risk), risk=risk,
+            findings=findings, files_reviewed=reviewed_files, reviewer=self.reviewer.name,
             collaboration=collaboration,
             run_mode=run_mode, components=components, execution=execution,
         )
