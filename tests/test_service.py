@@ -45,6 +45,38 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(0, result["report"]["collaboration"]["revision_rounds"])
         self.assertGreater(result["report"]["execution"]["tool_calls"], 0)
         self.assertEqual([], task["collaboration"])
+        self.assertNotIn("base_sha", task["input"])
+        self.assertNotIn("head_sha", task["input"])
+
+    def test_sync_review_stores_the_normalized_revision_pair_with_the_diff(self):
+        diff = "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+value = 1\n"
+        service = enable_agentic_service(ReviewService(self.settings))
+        try:
+            result = service.create_review("org/repo", diff, base_sha="A" * 40, head_sha="B" * 40)
+            task_id = result["task_id"]
+            task_input = service.store.get(task_id)["input"]
+            self.assertEqual(("a" * 40, "b" * 40), (task_input["base_sha"], task_input["head_sha"]))
+            self.assertEqual(diff, service.store.get_task_payload(task_id))
+        finally:
+            service.queue.close()
+
+    def test_invalid_revision_pairs_are_rejected_before_saving_any_task(self):
+        diff = "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+value = 1\n"
+        service = enable_agentic_service(ReviewService(self.settings))
+        try:
+            for submit in (service.create_review, service.enqueue_review):
+                for revisions in (
+                    {"base_sha": "a" * 40},
+                    {"head_sha": "b" * 40},
+                    {"base_sha": "g" * 40, "head_sha": "b" * 40},
+                    {"base_sha": "a" * 40, "head_sha": ""},
+                ):
+                    with self.subTest(submit=submit.__name__, revisions=revisions):
+                        with self.assertRaisesRegex(ValueError, "40-character hex"):
+                            submit("org/repo", diff, **revisions)
+            self.assertEqual([], service.store.list_tasks())
+        finally:
+            service.queue.close()
 
     def test_rejects_large_diff(self):
         service = enable_agentic_service(ReviewService(self.settings))

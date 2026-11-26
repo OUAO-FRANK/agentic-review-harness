@@ -140,6 +140,12 @@ with TemporaryDirectory() as checkout:
 
 每条上下文记录路径、行范围、原文、选择理由、提取方法、估算 Token 和 SHA-256。构建器优先保留变更所在的符号，再补充 import。Python 按静态名称引用优先选取 import。JavaScript 和 TypeScript（含 JSX/TSX）提取静态 import，Go 提取 import 声明。构建器按内容哈希去重，并以分组和调用方指定的较低预算为上限。语法解析失败、扩展名未知或完整符号超预算时，构建器尝试保留预算内的完整变更行。当前可通过 Python API 调用。
 
+## 分组审查流程
+
+调用 `POST /v1/reviews` 时，可随 `diff` 成对提交实际对应的 40 位 `base_sha` 和 `head_sha`，同步和异步请求都支持。若提供 `repository_root`，它应指向 head 的源码目录，用来补充各组的 ContextBundle。
+
+Planner 划分可审查文件，Worker 按组接收 Diff 和可用的上下文，每次审查最多同时执行两个组。Lead 汇总后，FindingGate 检查位置、证据和置信度。报告在 `collaboration.review_groups` 中列出分组。省略 SHA 对的调用沿用原审查流程和报告字段。
+
 ## Docker Compose
 
 需要 PostgreSQL、Redis 和 Web 服务时，复制示例配置并填写必需密钥：

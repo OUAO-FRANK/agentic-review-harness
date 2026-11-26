@@ -350,6 +350,11 @@ class ApiHandler(BaseHTTPRequestHandler):
                     "enabled_agents": enabled_agents,
                     "enabled_skills": enabled_skills,
                 }
+                if "base_sha" in payload or "head_sha" in payload:
+                    base_sha, head_sha = payload.get("base_sha"), payload.get("head_sha")
+                    if not isinstance(base_sha, str) or not isinstance(head_sha, str):
+                        raise ValueError("base_sha and head_sha must both be 40-character hex SHAs")
+                    options.update(base_sha=base_sha, head_sha=head_sha)
                 if query.get("async", ["false"])[0].lower() == "true":
                     result = self.service.enqueue_review(*args, **options)
                     self._send_json(202, result)

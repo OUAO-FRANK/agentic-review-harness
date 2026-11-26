@@ -1,4 +1,5 @@
 import hashlib
+import re
 import uuid
 from typing import Any, Dict, Optional
 
@@ -243,7 +244,16 @@ class ReviewService:
         tenant_id: str = "default", repository_root: str = "",
         enabled_agents: Optional[list] = None,
         enabled_skills: Optional[list] = None,
+        base_sha: Optional[str] = None, head_sha: Optional[str] = None,
     ) -> str:
+        revisions = {}
+        if base_sha is not None or head_sha is not None:
+            if not all(
+                isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{40}", sha)
+                for sha in (base_sha, head_sha)
+            ):
+                raise ValueError("base_sha and head_sha must both be 40-character hex SHAs")
+            revisions = {"base_sha": base_sha.lower(), "head_sha": head_sha.lower()}
         task_id = str(uuid.uuid4())
         encoded = diff.encode("utf-8")
         assignment = self.releases.assignment(tenant_id, "llm-review", task_id)
@@ -254,6 +264,7 @@ class ReviewService:
             "repository_root": repository_root,
             "enabled_agents": enabled_agents or [],
             "enabled_skills": enabled_skills or [],
+            **revisions,
         }, tenant_id)
         self.store.save_task_payload(task_id, diff)
         return task_id
@@ -277,6 +288,7 @@ class ReviewService:
         source: str = "api", tenant_id: str = "default", mode: str = "",
         repository_root: str = "", enabled_agents: Optional[list] = None,
         enabled_skills: Optional[list] = None,
+        base_sha: Optional[str] = None, head_sha: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._validate_review(repository, diff)
         RunMode.parse(mode) if mode else None
@@ -288,6 +300,7 @@ class ReviewService:
         task_id = self._create_task(
             repository, diff, pull_request, source, tenant_id,
             repository_root, enabled_agents, enabled_skills,
+            base_sha, head_sha,
         )
         try:
             with self.observability.span(
@@ -316,6 +329,7 @@ class ReviewService:
         tenant_id: str = "default", mode: str = "", repository_root: str = "",
         enabled_agents: Optional[list] = None,
         enabled_skills: Optional[list] = None,
+        base_sha: Optional[str] = None, head_sha: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._validate_review(repository, diff)
         RunMode.parse(mode) if mode else None
@@ -327,6 +341,7 @@ class ReviewService:
         task_id = self._create_task(
             repository, diff, pull_request, source, tenant_id,
             repository_root, enabled_agents, enabled_skills,
+            base_sha, head_sha,
         )
         self.queue.submit({
             "task_id": task_id, "repository": repository, "pull_request": pull_request,
