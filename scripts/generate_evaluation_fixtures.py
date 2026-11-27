@@ -7,7 +7,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from evoagent.evaluation_fixtures import (  # noqa: E402
+from diffledger.evaluation.fixtures import (  # noqa: E402
     generate_controlled_cases,
     generate_prompt_evolution_cases,
     write_fixture_files,

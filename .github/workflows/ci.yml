@@ -29,4 +29,4 @@ jobs:
       - name: Run tests
         run: python -m unittest discover -s tests -v
       - name: Compile Python sources
-        run: python -m compileall -q evoagent scripts tests
+        run: python -m compileall -q evoagent scripts tests diffledger

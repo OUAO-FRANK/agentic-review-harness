@@ -3,21 +3,35 @@ requires = ["setuptools>=68", "wheel>=0.42"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentic-review-harness"
+name = "diffledger"
 description = "Evidence-first multi-agent review harness for GitHub pull requests"
 readme = "README.md"
 requires-python = ">=3.11"
 dynamic = ["version", "dependencies"]
 
 [project.scripts]
+diffledger = "diffledger.cli:entrypoint"
 agentic-review = "evoagent.cli:entrypoint"
 
 [project.urls]
 Repository = "https://github.com/OUAO-FRANK/agentic-review-harness"
 
 [tool.setuptools.dynamic]
-version = { attr = "evoagent.__version__" }
+version = { attr = "diffledger.__version__" }
 dependencies = { file = ["requirements.txt"] }
 
-[tool.setuptools.packages.find]
-include = ["evoagent*"]
+[tool.setuptools]
+packages = [
+    "diffledger", "diffledger.evaluation", "evoagent", "evoagent.review",
+    "diffledger.assets.web", "diffledger.assets.skills", "diffledger.assets.evaluation_data",
+]
+
+[tool.setuptools.package-dir]
+"diffledger.assets.web" = "web"
+"diffledger.assets.skills" = "skills"
+"diffledger.assets.evaluation_data" = "evaluation_data"
+
+[tool.setuptools.package-data]
+"diffledger.assets.web" = ["*.html", "*.css", "*.js"]
+"diffledger.assets.skills" = ["*/SKILL.md"]
+"diffledger.assets.evaluation_data" = ["*.jsonl"]

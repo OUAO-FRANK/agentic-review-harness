@@ -12,14 +12,16 @@ ROOT = Path(__file__).resolve().parents[1]
 class PublicReleaseTests(unittest.TestCase):
     def test_public_brand_and_compatibility_defaults(self):
         settings = Settings.from_env()
-        self.assertEqual("Agentic Review Harness", settings.openrouter_app_name)
-        self.assertEqual("agentic-review-harness", settings.otel_service_name)
+        self.assertEqual("DiffLedger", settings.openrouter_app_name)
+        self.assertEqual("diffledger", settings.otel_service_name)
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("Python 包名 `evoagent`", readme)
+        self.assertTrue(readme.startswith("# DiffLedger\n"))
+        self.assertIn("python -m diffledger", readme)
+        self.assertIn("`agentic-review`", readme)
         self.assertIn("合成 fixture", readme)
         self.assertIn("不代表真实生产 PR", readme)
         self.assertIn("EVOAGENT_*", readme)
-        self.assertNotIn("python -m Agentic Review Harness", readme)
+        self.assertIn("上游仓库、版本和许可证尚待核实", readme)
 
     def test_compose_requires_explicit_credentials(self):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
@@ -62,7 +64,7 @@ class PublicReleaseTests(unittest.TestCase):
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("contents: read", readme)
-        self.assertIn("pull-requests: write", readme)
+        self.assertEqual("DiffLedger", action["name"])
         self.assertNotIn("token", action["inputs"])
 
     def test_github_action_runs_the_cli_and_uploads_the_report(self):

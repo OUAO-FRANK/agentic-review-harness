@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
-from ..diff_parser import iter_diff_lines, parse_unified_diff
+from ..diff_parser import file_header_path, iter_diff_lines, parse_unified_diff
 
 
 _SHA = re.compile(r"^[0-9a-fA-F]{40}$")
@@ -33,12 +33,10 @@ class ChangeSet:
             if kind == "boundary":
                 old_path = ""
             elif kind == "old-file":
-                old_path = line[4:].strip().split("\t", 1)[0]
+                old_path = file_header_path(line)
             elif kind == "new-file":
-                new_path = line[4:].strip().split("\t", 1)[0]
+                new_path = file_header_path(line)
                 path = old_path if new_path == "/dev/null" else new_path
-                if path.startswith(("a/", "b/")):
-                    path = path[2:]
                 if not path or path == "/dev/null" or path in paths:
                     raise ValueError("diff contains an invalid or duplicate path")
                 paths.append(path)

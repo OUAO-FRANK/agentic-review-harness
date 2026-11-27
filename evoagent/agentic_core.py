@@ -8,16 +8,16 @@ import os
 import textwrap
 import threading
 import time
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from .diff_parser import ParsedDiff
 from .context_manager import ContextManager
 from .gates import FindingGate
-from .finding_identity import canonical_identity
 from .llm import JsonChatClient
 from .models import ComponentKind, Finding, Severity
 from .modes import component, resolve_mode
 from .repository_tools import RepositoryToolSuite
+from .review import adjudication, delegation
 from .review.pipeline import ReviewPipeline
 from .review.types import ChangeSet
 from .reviewer import LocalRuleReviewer, Reviewer
@@ -95,21 +95,6 @@ ROLE_PERMISSIONS = {
     },
 }
 GROUP_DIFF_TOOLS = {"search_diff", "changed_line"}
-
-
-def _collect_evidence(observations: List[dict]) -> Dict[str, dict]:
-    values = {}
-    for item in observations:
-        result = item.get("result")
-        if isinstance(result, dict) and result.get("evidence_id"):
-            values[str(result["evidence_id"])] = {
-                "evidence_id": result["evidence_id"],
-                "tool": result.get("tool", item.get("tool", "")),
-                "output_preview": json.dumps(
-                    result.get("output"), ensure_ascii=False, default=str
-                )[:2000],
-            }
-    return values
 
 
 class BoundedRole:
@@ -239,43 +224,6 @@ class BoundedRole:
             )
         ledger.trace(self.name, "budget_exhausted", budget="steps")
         raise RuntimeBudgetExceeded("%s step budget exhausted" % self.name)
-
-
-def _parse_findings(result: dict, parsed: ParsedDiff, role: str) -> List[Finding]:
-    valid = {(item.path, item.line) for item in parsed.added_lines}
-    evidence = _collect_evidence(result.get("_observations") or [])
-    findings = []
-    for raw in result.get("findings") or []:
-        try:
-            path, line = str(raw.get("path", "")), int(raw.get("line", 0))
-        except (TypeError, ValueError):
-            continue
-        if (path, line) not in valid:
-            continue
-        try:
-            severity = Severity(str(raw.get("severity", "medium")).lower())
-        except ValueError:
-            severity = Severity.MEDIUM
-        refs = [
-            evidence[item] for item in raw.get("evidence_ids") or []
-            if str(item) in evidence
-        ]
-        chain = [item for item in (raw.get("call_chain") or []) if isinstance(item, dict)][:20]
-        try:
-            confidence = float(raw.get("confidence", 0.7))
-        except (TypeError, ValueError):
-            confidence = 0.7
-        findings.append(Finding(
-            rule_id=str(raw.get("rule_id", "LLM-REVIEW"))[:80],
-            cwe=str(raw.get("cwe", "")).strip().upper() or None,
-            severity=severity, title=str(raw.get("title", "Review finding"))[:200],
-            explanation=str(raw.get("explanation", ""))[:4000], path=path, line=line,
-            evidence=str(raw.get("evidence", ""))[:500],
-            fix=str(raw.get("fix", ""))[:4000], test=str(raw.get("test", ""))[:4000],
-            confidence=max(0.0, min(1.0, confidence)), evidence_refs=refs,
-            call_chain=chain, source=role,
-        ))
-    return findings
 
 
 class AgenticReviewer(Reviewer):
@@ -504,7 +452,7 @@ class AgenticReviewer(Reviewer):
                 if finding.source == "unknown":
                     finding.source = "declarative-scanner:%s" % scanner_name
             findings.extend(scanned)
-        findings = self._merge(findings)
+        findings = adjudication.merge_findings(findings)
         ast_scans = self._attach_diff_ast_evidence(findings, parsed, ledger)
         return findings, {}, [
             component(ComponentKind.TOOL_SCANNER, "local-rule-scanner"),
@@ -551,7 +499,7 @@ class AgenticReviewer(Reviewer):
             session["scanner_complete"] = True
             session["phase"] = "scanned"
             self._save_lead_session(task_id, session, ledger)
-        rule_findings = self._restore_findings(session["scanner_findings"])
+        rule_findings = adjudication.restore_findings(session["scanner_findings"])
 
         if not session["delegations"]:
             decision = self._run_lead(
@@ -570,14 +518,10 @@ class AgenticReviewer(Reviewer):
                     "recalled_memory": memory_context,
                 }, suite, ledger, task_id, max_steps=1, allow_tools=False,
             )
-            session["delegations"] = self._normalize_delegations(
+            session["delegations"] = delegation.plan_assignments(
                 decision.get("delegations"), worker_roles, parsed.files,
-                set(available_skills), requested_skills,
+                available_skills, requested_skills, groups=groups,
             )
-            if groups is not None:
-                session["delegations"] = self._group_delegations(
-                    session["delegations"], groups, worker_roles, available_skills, requested_skills,
-                )
             session["lead_delegation"] = self._public_decision(decision)
             session["risk_level"] = self._normalize_risk_level(
                 decision.get("risk_level")
@@ -608,7 +552,7 @@ class AgenticReviewer(Reviewer):
 
         final_assessment = {}
         if high_risk:
-            candidates = self._session_candidates(session)
+            candidates = adjudication.session_candidates(session)
             if not session["lead_assessments"]:
                 assessment = self._run_lead(
                     "assess-workers", {
@@ -629,24 +573,12 @@ class AgenticReviewer(Reviewer):
             else:
                 assessment = session["lead_assessments"][0]
             final_assessment = assessment
-            requests = self._normalize_revision_requests(
+            revisions = delegation.plan_revisions(
                 assessment.get("revision_requests"), session["delegations"],
             )
-            revision_assignments = []
-            for request in requests:
-                key = "1:%s" % request["assignment_id"]
-                if key in session["revision_results"]:
-                    continue
-                original = next(
-                    item for item in session["delegations"]
-                    if item["assignment_id"] == request["assignment_id"]
-                )
-                revision = dict(original)
-                revision["run_id"] = key
-                revision["revision_round"] = 1
-                revision["lead_feedback"] = request["guidance"]
-                revision["required_evidence"] = request["required_evidence"]
-                revision_assignments.append(revision)
+            revision_assignments = [
+                row for row in revisions if row["run_id"] not in session["revision_results"]
+            ]
             self._run_pending_assignments(
                 task_id, session, diff, parsed, suite, ledger, revision_assignments,
                 revision_round=1,
@@ -667,12 +599,12 @@ class AgenticReviewer(Reviewer):
                     worker=revision["worker"], round=1,
                     status=result["status"],
                 )
-            if requests:
+            if revisions:
                 session["revision_rounds"] = 1
                 session["phase"] = "revision-1-completed"
                 self._save_lead_session(task_id, session, ledger)
 
-        candidates = self._session_candidates(session)
+        candidates = adjudication.session_candidates(session)
         session["candidate_findings_before_critic"] = len(candidates)
         if "critic" in enabled and not session.get("critic_complete"):
             critic_result = self._run_critic(
@@ -681,14 +613,14 @@ class AgenticReviewer(Reviewer):
                 suite, ledger, task_id, memory_context,
                 max_steps=1, allow_tools=False,
             )
-            candidates, decisions = self._apply_critic(critic_result, candidates)
+            candidates, decisions = adjudication.apply_critic(critic_result, candidates)
             session["critic_decisions"] = decisions
             session["critic_candidates"] = [item.to_dict() for item in candidates]
             session["critic_complete"] = True
             session["phase"] = "critic-completed"
             self._save_lead_session(task_id, session, ledger)
         elif session.get("critic_complete"):
-            candidates = self._restore_findings(session.get("critic_candidates") or [])
+            candidates = adjudication.restore_findings(session.get("critic_candidates") or [])
         else:
             session["critic_decisions"] = [
                 {"finding_index": index, "accepted": True, "objections": []}
@@ -724,7 +656,7 @@ class AgenticReviewer(Reviewer):
                     if item.get("accepted")
                 ]
             session["lead_final"] = self._public_decision(final_decision)
-        accepted = self._apply_lead_final(session["lead_final"], candidates)
+        accepted = adjudication.accepted_findings(session["lead_final"], candidates)
         session["accepted_findings"] = [item.to_dict() for item in accepted]
         session["phase"] = "completed"
         session["stop_reason"] = (
@@ -1034,7 +966,7 @@ class AgenticReviewer(Reviewer):
                 "worker": assignment["worker"], "revision_round": revision_round,
             }
             try:
-                findings = _parse_findings(
+                findings = adjudication.worker_findings(
                     run(assignment, scope), parsed if scope is None else scope.parsed, assignment["worker"],
                 )
                 result.update(status="completed", findings=[item.to_dict() for item in findings], error="")
@@ -1059,76 +991,6 @@ class AgenticReviewer(Reviewer):
                 save(future.result() for future in as_completed(futures))
         else:
             save(self.pipeline.workers.run(pending, execute))
-
-    def _group_delegations(self, assignments, groups, worker_roles, available_skills, requested_skills):
-        values = []
-        for group_id, scope in groups.items():
-            selected = []
-            for assignment in assignments:
-                paths = [path for path in scope.group.paths if path in assignment["files"]]
-                if paths:
-                    selected.append(dict(assignment, files=paths))
-            if not selected:
-                selected = self._normalize_delegations(
-                    None, worker_roles, scope.group.paths, available_skills, requested_skills,
-                )
-            values.extend(
-                dict(item, assignment_id=f"{group_id}:{item['assignment_id']}", group_id=group_id)
-                for item in selected
-            )
-        return values
-
-    @staticmethod
-    def _normalize_delegations(
-        raw, worker_roles, changed_files, available_skills=None, requested_skills=None,
-    ):
-        available_skills = set(available_skills or set())
-        requested_skills = [
-            name for name in requested_skills or [] if name in available_skills
-        ]
-        values, seen_ids, covered = [], set(), set()
-        for index, item in enumerate(raw or []):
-            if not isinstance(item, dict):
-                continue
-            worker = str(item.get("worker", ""))
-            if worker not in worker_roles:
-                continue
-            assignment_id = str(
-                item.get("assignment_id") or "%s-%d" % (worker, index + 1)
-            )[:100]
-            if not assignment_id or assignment_id in seen_ids:
-                continue
-            seen_ids.add(assignment_id)
-            covered.add(worker)
-            values.append({
-                "assignment_id": assignment_id, "worker": worker,
-                "objective": str(item.get("objective") or "Review the assigned risk domain.")[:2000],
-                "files": [str(value)[:500] for value in item.get("files") or changed_files][:100],
-                "risk_domains": [str(value)[:100] for value in item.get("risk_domains") or []][:20],
-                "required_evidence": [str(value)[:200] for value in item.get("required_evidence") or []][:20],
-                "skills": list(dict.fromkeys(requested_skills + [
-                    str(value) for value in item.get("skills") or []
-                    if str(value) in available_skills
-                ])),
-            })
-            if len(values) >= 12:
-                break
-        defaults = {
-            "security": "Review security, authorization, input and sensitive-data risks.",
-            "correctness-reliability": (
-                "Review correctness, failure handling, concurrency, resources and compatibility."
-            ),
-        }
-        for worker in worker_roles:
-            if worker in covered or len(values) >= 12:
-                continue
-            values.append({
-                "assignment_id": "%s-default" % worker, "worker": worker,
-                "objective": defaults[worker], "files": list(changed_files)[:100],
-                "risk_domains": [], "required_evidence": ["changed-line evidence"],
-                "skills": list(requested_skills),
-            })
-        return values
 
     @staticmethod
     def _normalize_risk_level(value):
@@ -1172,115 +1034,6 @@ class AgenticReviewer(Reviewer):
         ))
 
     @staticmethod
-    def _normalize_revision_requests(raw, assignments):
-        by_id = {item["assignment_id"]: item for item in assignments}
-        values, seen = [], set()
-        for item in raw or []:
-            if not isinstance(item, dict):
-                continue
-            assignment_id = str(item.get("assignment_id", ""))
-            original = by_id.get(assignment_id)
-            if not original or assignment_id in seen:
-                continue
-            worker = str(item.get("worker") or original["worker"])
-            if worker != original["worker"]:
-                continue
-            guidance = str(item.get("guidance", "")).strip()
-            if not guidance:
-                continue
-            seen.add(assignment_id)
-            values.append({
-                "assignment_id": assignment_id, "worker": worker,
-                "guidance": guidance[:2000],
-                "required_evidence": [
-                    str(value)[:200] for value in item.get("required_evidence") or []
-                ][:20],
-            })
-        return values
-
-    def _session_candidates(self, session):
-        findings = self._restore_findings(session["scanner_findings"])
-        for result in session["worker_results"].values():
-            findings.extend(self._restore_findings(result.get("findings") or []))
-        return self._merge(findings)
-
-    @staticmethod
-    def _apply_critic(result, candidates):
-        evidence = _collect_evidence(result.get("_observations") or [])
-        by_index = {
-            int(item.get("finding_index")): item
-            for item in result.get("decisions") or []
-            if isinstance(item, dict) and str(item.get("finding_index", "")).isdigit()
-        }
-        decisions = []
-        for index, finding in enumerate(candidates):
-            decision = by_index.get(index)
-            accepted = bool(decision and decision.get("accepted"))
-            if decision:
-                try:
-                    adjustment = float(decision.get("confidence_adjustment", 0))
-                except (TypeError, ValueError):
-                    adjustment = 0.0
-                finding.confidence = max(0.0, min(1.0, finding.confidence + adjustment))
-                finding.evidence_refs.extend(
-                    evidence[str(value)]
-                    for value in decision.get("supporting_evidence_ids") or []
-                    if str(value) in evidence
-                )
-            decisions.append({
-                "finding_index": index, "accepted": accepted,
-                "objections": (decision or {}).get(
-                    "objections", ["critic returned no explicit decision"]
-                ),
-            })
-        return candidates, decisions
-
-    @staticmethod
-    def _apply_lead_final(decision, candidates):
-        raw_indices = decision.get("accepted_finding_indices") or []
-        accepted_indices = {
-            int(value) for value in raw_indices if str(value).isdigit()
-            and 0 <= int(value) < len(candidates)
-        }
-        adjustments = {
-            int(item.get("finding_index")): item.get("adjustment", 0)
-            for item in decision.get("confidence_adjustments") or []
-            if isinstance(item, dict) and str(item.get("finding_index", "")).isdigit()
-        }
-        accepted = []
-        for index in sorted(accepted_indices):
-            finding = candidates[index]
-            try:
-                adjustment = float(adjustments.get(index, 0))
-            except (TypeError, ValueError):
-                adjustment = 0.0
-            finding.confidence = max(0.0, min(1.0, finding.confidence + adjustment))
-            accepted.append(finding)
-        return accepted
-
-    @staticmethod
-    def _restore_findings(values):
-        findings = []
-        for value in values or []:
-            try:
-                severity = Severity(str(value.get("severity", "medium")))
-                findings.append(Finding(
-                    rule_id=str(value.get("rule_id", "REVIEW")), severity=severity,
-                    cwe=str(value.get("cwe", "")).strip().upper() or None,
-                    title=str(value.get("title", "Review finding")),
-                    explanation=str(value.get("explanation", "")),
-                    path=str(value.get("path", "")), line=int(value.get("line", 0)),
-                    evidence=str(value.get("evidence", "")), fix=str(value.get("fix", "")),
-                    test=str(value.get("test", "")), confidence=float(value.get("confidence", 0.7)),
-                    evidence_refs=list(value.get("evidence_refs") or []),
-                    call_chain=list(value.get("call_chain") or []),
-                    source=str(value.get("source", "unknown")),
-                ))
-            except (TypeError, ValueError):
-                continue
-        return findings
-
-    @staticmethod
     def _public_decision(result):
         return {
             key: value for key, value in result.items()
@@ -1317,20 +1070,6 @@ class AgenticReviewer(Reviewer):
             }, "completed" if completed else "in_progress",
             max(1, len(ledger.model_calls)),
         )
-
-    @staticmethod
-    def _merge(findings: Iterable[Finding]) -> List[Finding]:
-        merged = {}
-        for finding in findings:
-            key = (
-                finding.path, finding.line,
-                canonical_identity(finding.rule_id, finding.cwe),
-            )
-            current = merged.get(key)
-            if current is None or finding.confidence > current.confidence:
-                merged[key] = finding
-        order = {Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2, Severity.LOW: 3}
-        return sorted(merged.values(), key=lambda item: (order[item.severity], item.path, item.line))
 
     @staticmethod
     def _scanner_name(name: str) -> str:

@@ -1,8 +1,8 @@
-# Agentic Review Harness
+# DiffLedger
 
-面向 GitHub Pull Request 的多智能体代码审查与安全修复系统。
+DiffLedger 是面向 GitHub Pull Request 的证据审查工具。提交一份 unified diff，可以在本地用规则检查新增行。接入模型后，服务可以把同一个 PR 按文件分组审查，在报告中记录每条发现对应的文件、行号和代码证据。
 
-它把一次 PR 审查拆成可追踪的工作流：解析 Diff、分派专长 Agent、收集证据、合并结论，并在满足验证条件时生成安全修复建议。项目同时提供本地规则模式和 OpenAI 兼容模型接入，适合研究 Agent 协作、审查可靠性和反馈驱动的提示词演进。
+项目基于一份已有代码快照继续开发。该快照的上游仓库、版本和许可证尚待核实。仓库保留了当时的[导入记录](https://github.com/OUAO-FRANK/agentic-review-harness/commit/165c031)。
 
 ## 核心能力
 
@@ -21,7 +21,7 @@
 - 多 Agent 风险检测 F1 从 81.9% 提升至 **92.5%**
 - 高风险召回率从 84.2% 提升至 **94.7%**
 
-以上结果来自项目内生成的合成 fixture（受控样本），不代表真实生产 PR 的表现。评测 harness 与 fixture 位于 `evaluation_data/`，可用 `scripts/` 下的工具离线复现。
+以上结果来自项目内生成的合成 fixture（受控样本），不代表真实生产 PR 的表现。评测代码位于 `diffledger/evaluation/`，样本位于 `evaluation_data/`，可用 `scripts/` 下的工具离线复现。
 
 ## 一次审查如何运行
 
@@ -58,32 +58,30 @@ AgentRuntime ── checkpoint / budget / trace
 
 ## 快速开始
 
-项目使用 Python 3.11；Python 包名 `evoagent` 保留用于兼容现有命令。默认 `local` provider 不需要 LLM 密钥，可以先用规则审查模式启动服务：
+以下 PowerShell 命令使用 Python 3.11，在仓库根目录新建虚拟环境、安装项目并检查配置。默认配置可直接运行规则审查。从旧发行包迁移时也请使用新环境，两个发行包使用相同的 `evoagent` 导入路径和 `agentic-review` 命令。
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install -e .
-python -m evoagent
+diffledger doctor
 ```
 
-安装后可运行环境诊断；配置有效时退出码为 0，配置缺失或非法时退出码为 1：
+`doctor` 检查通过时返回 0，配置错误时返回 1。旧命令 `agentic-review` 继续可用。
 
-```powershell
-agentic-review doctor
-```
-
-接入 GitHub 前运行 `agentic-review doctor --github`。它分别检查 GitHub App 或 PAT 所需的本地配置、App 私钥文件路径和公开 HTTPS URL，列出缺失的变量名，不打印凭据。GitHub Action 的本地 Diff 审查无需 GitHub 凭据；此命令不会调用 GitHub API，也不证明远端权限已授予。
+接入 GitHub 前运行 `diffledger doctor --github`。它检查 GitHub App 或 PAT 的本地配置，按变量名报告缺失项。远端权限需在 GitHub 侧核实。
 
 本地 Diff 可以从 stdin 或 UTF-8 文件审查：
 
 ```powershell
-git diff | agentic-review review
-agentic-review review change.diff
+git diff | diffledger review
+diffledger review change.diff
 ```
 
 自动化场景使用稳定的 JSON 合约：
 
 ```powershell
-git diff | agentic-review review --format json
+git diff | diffledger review --format json
 ```
 
 成功结果包含 `schema_version`、`status`、`reviewer`、`summary`、`files` 和
@@ -91,12 +89,11 @@ git diff | agentic-review review --format json
 `error.code`/`error.message`，同时返回非零退出码。JSON 模式只向 stdout
 写入 JSON，默认文本模式保持适合终端阅读的输出。
 
-GitHub Action 调用方应显式声明最小权限：
+GitHub Action 审查已准备好的 Diff 并上传报告。使用 `actions/checkout` 的工作流可声明以下权限。
 
 ```yaml
 permissions:
   contents: read
-  pull-requests: write
 ```
 
 Action 合约提供 `diff-path`、`mode`、`output-path` 和 `python-version` 输入，
@@ -104,16 +101,24 @@ Action 合约提供 `diff-path`、`mode`、`output-path` 和 `python-version` �
 `deep` 已预留但会明确失败，待分阶段 Pipeline 和沙箱能力完成后开放。
 Action 不接收 GitHub token 输入，由调用工作流控制权限。
 
-打开 `http://127.0.0.1:8080/` 查看管理台，健康检查地址为 `http://127.0.0.1:8080/health`。本地开发默认关闭登录；需要启用登录时，在启动前设置 `EVOAGENT_AUTH_REQUIRED=true`、`EVOAGENT_AUTH_SECRET` 和管理员凭据。
+运行 `python -m diffledger` 启动服务。打开 `http://127.0.0.1:8080/` 查看管理台，健康检查地址为 `http://127.0.0.1:8080/health`。需要启用登录时，在启动前设置 `EVOAGENT_AUTH_REQUIRED=true`、`EVOAGENT_AUTH_SECRET` 和管理员凭据。
 
-服务也可以通过 `POST /v1/reviews` 接收 Diff，通过 `GET /v1/tasks/{id}/report` 获取 Markdown 报告。完整请求模型见 `evoagent/api.py`，README 不展开端点清单。
+配置模型并启动服务后，向 `POST /v1/reviews` 提交 Diff，再用返回的 `task_id` 请求 `GET /v1/tasks/{id}/report` 获取 Markdown 报告。仅使用本地规则时运行 `diffledger review`。
 
 ## 变化规划基础
 
-Python API 可将 Diff 固定到 base/head SHA，筛除 vendor、generated、lock 和二进制文件，确定性地将同名源码与测试配对，并按文件数和估算 Token 上限分组：
+审查前可以查看实际分组和排除的路径。下面的命令选取最近一次提交，输出各组的文件、稳定 ID 和预算。
+
+```powershell
+$base = git rev-parse HEAD~1
+$head = git rev-parse HEAD
+git diff $base $head | diffledger plan --base-sha $base --head-sha $head --max-files 4 --max-tokens 2048
+```
+
+也可以通过 Python 构建同一份计划。
 
 ```python
-from evoagent.review import ChangePlanner, ChangeSet
+from diffledger.review import ChangePlanner, ChangeSet
 
 source = "import math\n\ndef circumference(radius):\n    return math.tau * radius\n"
 diff = "--- a/src/app.py\n+++ b/src/app.py\n@@ -3,0 +4 @@\n+    return math.tau * radius\n"
@@ -128,7 +133,7 @@ print([(group.group_id, group.paths, group.token_budget) for group in groups])
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from evoagent.review import ContextBuilder
+from diffledger.review import ContextBuilder
 
 with TemporaryDirectory() as checkout:
     app = Path(checkout) / "src/app.py"
@@ -180,7 +185,7 @@ $env:EVOAGENT_LLM_BASE_URL = 'https://example.com/v1'
 $env:EVOAGENT_LLM_API_KEY = '<token>'
 $env:EVOAGENT_LLM_MODEL = '<model-name>'
 
-python -m evoagent
+python -m diffledger
 ```
 
 更多参数见 `.env.example`。密钥只通过环境变量读取，不要提交到仓库。
@@ -261,6 +266,7 @@ Skill 可以附带文本资源，运行时只把已选中的资源注册给对�
 ## 项目结构
 
 ```text
+diffledger/        服务启动入口、公开 Python API 与评测工具
 evoagent/          核心服务、Runtime、审查器和存储
 skills/            Agent Skill 协议与资源
 web/               管理台前端
@@ -273,7 +279,7 @@ tests/             单元测试与集成测试
 
 ```powershell
 python -m unittest discover -s tests -v
-python -m compileall -q evoagent scripts tests
+python -m compileall -q diffledger evoagent scripts tests
 ```
 
 提交前请确认 `.env`、数据库文件、缓存和本地密钥没有进入 Git；可参考 `.gitignore` 和 `.env.example`。

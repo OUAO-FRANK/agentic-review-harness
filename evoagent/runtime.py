@@ -1,4 +1,4 @@
-"""Agentic Review Harness's dependency-free durable workflow runtime and tool registry.
+"""DiffLedger's dependency-free durable workflow runtime and tool registry.
 
 The runtime deliberately separates orchestration from agent behaviour:
 

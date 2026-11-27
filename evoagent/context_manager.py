@@ -13,7 +13,7 @@ import re
 import threading
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .diff_parser import HUNK_HEADER, iter_diff_lines
+from .diff_parser import HUNK_HEADER, file_header_path, iter_diff_lines
 
 SYMBOL = re.compile(
     r"(?:def|class|function|func|interface|type)\s+([A-Za-z_$][A-Za-z0-9_$]*)"
@@ -398,8 +398,7 @@ class ContextManager:
                 if kind == "boundary":
                     path = ""
                 elif kind == "new-file":
-                    value = raw[4:].strip().split("\t", 1)[0]
-                    path = value[2:] if value.startswith("b/") else value
+                    path = file_header_path(raw)
             elif kind == "hunk":
                 flush()
                 header = raw

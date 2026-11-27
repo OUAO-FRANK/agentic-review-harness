@@ -246,6 +246,74 @@ class CliTests(unittest.TestCase):
         self.assertEqual("input-read-failed", payload["error"]["code"])
         self.assertIn("missing.diff", payload["error"]["message"])
 
+    def test_plan_matches_runtime_group_ids_and_reports_filtered_paths(self):
+        from evoagent.review import ChangePlanner, ChangeSet
+
+        diff = RISKY_DIFF + RISKY_DIFF.replace("app.py", "vendor/helper.py")
+        base, head = "a" * 40, "b" * 40
+        args = ["plan", "--base-sha", base, "--head-sha", head, "--max-tokens", "16"]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "change.diff"
+            path.write_text(diff, encoding="utf-8-sig")
+            reports = []
+            for source in (["-"], [str(path)]):
+                output = io.StringIO()
+                code = self._run_cli(args + source, stdin=io.StringIO(diff), stdout=output)
+                self.assertEqual(0, code)
+                reports.append(json.loads(output.getvalue()))
+        self.assertEqual(*reports)
+        report = reports[0]
+        expected, = ChangePlanner(max_tokens=16).plan(ChangeSet.from_diff(diff, base, head))
+        group, = report["groups"]
+        self.assertEqual(expected.group_id, group["group_id"])
+        self.assertEqual(["app.py"], group["paths"])
+        self.assertEqual("oversized-file", group["reason"])
+        self.assertEqual(16, group["token_budget"])
+        self.assertGreater(group["estimated_tokens"], group["token_budget"])
+        self.assertEqual(["vendor/helper.py"], report["excluded_paths"])
+        self.assertEqual((base, head), (report["base_sha"], report["head_sha"]))
+
+    def test_plan_rejects_malformed_input_with_json_error(self):
+        args = ["plan", "--base-sha", "a" * 40, "--head-sha", "b" * 40]
+        for diff in ("not a patch", RISKY_DIFF.removesuffix("+eval(user_input)\n")):
+            with self.subTest(diff=diff):
+                output = io.StringIO()
+                self.assertEqual(1, self._run_cli(args, stdin=io.StringIO(diff), stdout=output))
+                self.assertEqual("invalid-diff", json.loads(output.getvalue())["error"]["code"])
+
+    def test_plan_reports_binary_patch_without_file_headers(self):
+        boundary = "diff --git a/icon.png b/icon.png"
+        diff = (boundary + "\nBinary files a/icon.png and b/icon.png differ\n"
+                + "diff --git a/app.py b/app.py\n" + RISKY_DIFF)
+        output = io.StringIO()
+        code = self._run_cli(
+            ["plan", "--base-sha", "a" * 40, "--head-sha", "b" * 40],
+            stdin=io.StringIO(diff),
+            stdout=output,
+        )
+        self.assertEqual(0, code)
+        report = json.loads(output.getvalue())
+        self.assertEqual([boundary], report["metadata_only"])
+        self.assertEqual(["app.py"], report["groups"][0]["paths"])
+
+    def test_plan_decodes_git_quoted_utf8_paths(self):
+        # Git's default core.quotePath encodes each UTF-8 byte in octal.
+        path = r"\346\265\213.py"
+        diff = f'--- "a/{path}"\n+++ "b/{path}"\n@@ -0,0 +1 @@\n+value = 1\n'
+        output = io.StringIO()
+        code = self._run_cli(["plan", "--base-sha", "a" * 40, "--head-sha", "b" * 40],
+                             stdin=io.StringIO(diff), stdout=output)
+        self.assertEqual(0, code)
+        self.assertEqual(["测.py"], json.loads(output.getvalue())["groups"][0]["paths"])
+
+    def test_plan_rejects_malformed_hunk_header(self):
+        output = io.StringIO()
+        code = self._run_cli(["plan", "--base-sha", "a" * 40, "--head-sha", "b" * 40],
+                             stdin=io.StringIO(RISKY_DIFF.replace("@@ -0,0 +1 @@", "@@ broken @@")),
+                             stdout=output)
+        self.assertEqual(1, code)
+        self.assertEqual("invalid-diff", json.loads(output.getvalue())["error"]["code"])
+
 
 if __name__ == "__main__":
     unittest.main()

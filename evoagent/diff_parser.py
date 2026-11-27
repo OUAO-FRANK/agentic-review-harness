@@ -1,3 +1,4 @@
+import codecs
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -18,6 +19,18 @@ HUNK_HEADER = re.compile(
     r"\+(?P<new>\d+)(?:,(?P<new_count>\d+))?\s+@@(?P<label>.*)$"
 )
 _NO_NEWLINE = "\\ No newline at end of file"
+
+
+def file_header_path(header: str) -> str:
+    """Return the repository path from a --- or +++ header, retaining /dev/null."""
+    value = header[4:].split("\t", 1)[0]
+    if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+        try:
+            value = codecs.escape_decode(value[1:-1].encode("utf-8"))[0].decode("utf-8")
+        except (ValueError, UnicodeError):
+            # Keep Git's printable spelling when the filename is not UTF-8 text.
+            return value
+    return value.removeprefix("a/" if header.startswith("--- ") else "b/")
 
 
 def iter_diff_lines(diff: str, *, strict: bool = False) -> Iterator[tuple[str, str]]:
@@ -72,6 +85,8 @@ def iter_diff_lines(diff: str, *, strict: bool = False) -> Iterator[tuple[str, s
             new_remaining = int(match["new_count"] or "1")
             in_hunk = True
             yield "hunk", raw
+        elif strict and raw.startswith("@@"):
+            raise ValueError(f"malformed unified diff hunk header at input line {position}")
 
     if strict and (old_remaining or new_remaining):
         raise ValueError("truncated unified diff hunk at end of input")
@@ -88,9 +103,7 @@ def parse_unified_diff(diff: str) -> ParsedDiff:
         if kind == "boundary":
             current_path = ""
         elif kind == "new-file":
-            current_path = raw[4:].strip().split("\t", 1)[0]
-            if current_path.startswith("b/"):
-                current_path = current_path[2:]
+            current_path = file_header_path(raw)
             if current_path != "/dev/null" and current_path not in files:
                 files.append(current_path)
         elif kind == "hunk":
