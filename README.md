@@ -13,15 +13,15 @@ DiffLedger 是面向 GitHub Pull Request 的证据审查工具。提交一份 un
 - **GitHub 集成**：接收 PR Webhook，可选回写评论、创建独立修复分支。
 - **可演进评测**：反馈样本进入 replay/holdout 流程，候选提示词和 Skill 通过门禁后才可激活。
 
-## 评测结果
+## 离线评测
 
-在 100 个受控 PR Diff 样本上，按仓库划分 Validation / Holdout 评测：
+`evaluation_data/pr_diff_100.jsonl` 包含 100 个合成 fixture，其中 40 个有标注风险，60 个为干净样本。在这 100 个样本上，本地规则审查器的 Precision、Recall 和 F1 均为 1.000。这个结果可用来检查规则或评分实现是否发生回归，不代表真实生产 PR 的表现。
 
-- PR Review 准确率 **92.5%**
-- 多 Agent 风险检测 F1 从 81.9% 提升至 **92.5%**
-- 高风险召回率从 84.2% 提升至 **94.7%**
+在仓库根目录运行下面的命令可复现规则基线。输出 JSON 的 `controlled.metrics` 包含评分，`controlled.dataset_contract` 记录样本数和仓库划分检查的结果。默认运行无需外部模型。
 
-以上结果来自项目内生成的合成 fixture（受控样本），不代表真实生产 PR 的表现。评测代码位于 `diffledger/evaluation/`，样本位于 `evaluation_data/`，可用 `scripts/` 下的工具离线复现。
+```powershell
+python scripts/run_accuracy_experiment.py --output output/accuracy/evaluation.json
+```
 
 ## 一次审查如何运行
 
