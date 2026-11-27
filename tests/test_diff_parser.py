@@ -3,6 +3,7 @@ import unittest
 from evoagent import diff_parser
 from evoagent.context_manager import ContextManager
 from evoagent.diff_parser import parse_unified_diff
+from evoagent.review.pipeline import _file_patches
 from evoagent.review.types import ChangeSet
 
 
@@ -20,6 +21,22 @@ index 123..456 100644
 
 
 class DiffParserTests(unittest.TestCase):
+    def test_quoted_path_matches_source_context_and_scoped_patch(self):
+        encoded = r"\346\265\213\tfile.py"
+        path = "测\tfile.py"
+        diff = (f'--- "a/{encoded}"\told timestamp\n'
+                f'+++ "b/{encoded}"\tnew timestamp\n@@ -0,0 +1 @@\n+value = 1\n')
+        self.assertEqual([path], parse_unified_diff(diff).files)
+        self.assertEqual((1,), ChangeSet.from_diff(diff, "a" * 40, "b" * 40).file(path).added_lines)
+        self.assertEqual(path, ContextManager().compress_diff(diff)["selected_hunks"][0]["path"])
+        self.assertEqual({path: diff}, _file_patches(diff))
+
+    def test_non_strict_parser_tolerates_unrecognized_hunk_header(self):
+        diff = "--- a/demo.py\n+++ b/demo.py\n@@ broken @@\n"
+        self.assertEqual(["demo.py"], parse_unified_diff(diff).files)
+        with self.assertRaisesRegex(ValueError, "malformed unified diff hunk"):
+            list(diff_parser.iter_diff_lines(diff, strict=True))
+
     def test_parses_added_line_numbers(self):
         parsed = parse_unified_diff(DIFF)
         self.assertEqual(["app.py"], parsed.files)

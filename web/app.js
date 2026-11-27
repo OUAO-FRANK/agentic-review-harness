@@ -100,7 +100,7 @@ function show(view, updateHash = true) {
   });
   $(`#view-${view}`).classList.add("active");
   $("#page-title").textContent = titles[view];
-  document.title = `${titles[view]} · Agentic Review Harness`;
+  document.title = `${titles[view]} · DiffLedger`;
   if (updateHash) history.replaceState(null, "", `#${view}`);
 
   if (view === "tasks") loadTasks();
@@ -240,13 +240,38 @@ async function loadTasks() {
 
 async function openTask(id) {
   show("tasks");
-  $("#task-report").textContent = "正在加载任务报告…";
+  selectedTask = id;
+  selectedTaskData = null;
+  $("#report-status").textContent = "正在加载任务报告…";
+  $("#report-findings").replaceChildren();
+  $("#report-raw").classList.add("hidden");
+  $("#report-raw").open = false;
+  $("#create-fix").classList.add("hidden");
   $("#feedback-panel").classList.add("hidden");
   try {
     const task = await api(`/v1/tasks/${encodeURIComponent(id)}`);
-    selectedTask = id;
+    if (selectedTask !== id) return;
     selectedTaskData = task;
     $("#task-report").textContent = formatJson(task);
+    $("#report-raw").classList.remove("hidden");
+    const report = task.report;
+    if (report) {
+      const findings = report.findings || [];
+      $("#report-status").textContent = report.summary || `审查发现 ${findings.length} 项`;
+      for (const finding of findings) {
+        const row = document.createElement("li");
+        const title = document.createElement("strong");
+        title.textContent = finding.title || finding.rule_id;
+        const location = document.createElement("code");
+        location.textContent = `${finding.path}:${finding.line}`;
+        const evidence = document.createElement("pre");
+        evidence.textContent = finding.evidence;
+        row.append(title, location, evidence);
+        $("#report-findings").append(row);
+      }
+    } else {
+      $("#report-status").textContent = stateLabels[task.state] || task.state;
+    }
     $("#create-fix").classList.toggle("hidden", !(task.report && task.pull_request));
     const feedbackReady = task.state === "SUCCESS" && task.report;
     $("#feedback-panel").classList.toggle("hidden", !feedbackReady);
@@ -255,7 +280,8 @@ async function openTask(id) {
       await loadTaskFeedback(id);
     }
   } catch (error) {
-    $("#task-report").textContent = error.message;
+    if (selectedTask !== id) return;
+    $("#report-status").textContent = error.message;
     selectedTaskData = null;
   }
 }

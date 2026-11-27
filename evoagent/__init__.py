@@ -1,3 +1,3 @@
-"""Agentic Review Harness PR review service."""
+"""Compatibility namespace for the review runtime."""
 
-__version__ = "0.3.0"
+from diffledger import __version__ as __version__

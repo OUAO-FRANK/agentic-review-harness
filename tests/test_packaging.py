@@ -17,11 +17,11 @@ class PackagingTests(unittest.TestCase):
             build_root.mkdir()
             for filename in ("pyproject.toml", "requirements.txt", "README.md"):
                 shutil.copy2(ROOT / filename, build_root / filename)
-            shutil.copytree(
-                ROOT / "evoagent",
-                build_root / "evoagent",
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
+            for directory in ("diffledger", "evoagent", "web", "skills", "evaluation_data"):
+                shutil.copytree(
+                    ROOT / directory, build_root / directory,
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                )
             wheel_dir = Path(temp_dir) / "wheelhouse"
             result = subprocess.run(
                 [
@@ -42,14 +42,18 @@ class PackagingTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-            wheels = list(wheel_dir.glob("agentic_review_harness-*.whl"))
+            wheels = list(wheel_dir.glob("diffledger-*.whl"))
             self.assertEqual(1, len(wheels))
             with zipfile.ZipFile(wheels[0]) as archive:
                 self.assertIn("evoagent/__init__.py", archive.namelist())
+                for asset in ("web/index.html", "skills/reliability-review/SKILL.md",
+                              "evaluation_data/pr_diff_100.jsonl"):
+                    self.assertIn("diffledger/assets/" + asset, archive.namelist())
                 entry_points = [
                     name for name in archive.namelist() if name.endswith("entry_points.txt")
                 ]
                 self.assertEqual(1, len(entry_points))
+                self.assertIn("diffledger = diffledger.cli:entrypoint", archive.read(entry_points[0]).decode())
                 self.assertIn(
                     "agentic-review = evoagent.cli:entrypoint",
                     archive.read(entry_points[0]).decode("utf-8"),

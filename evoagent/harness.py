@@ -1,4 +1,4 @@
-"""Checkpointed review workflow powered by the Agentic Review Harness runtime."""
+"""Checkpointed review workflow powered by the DiffLedger runtime."""
 import threading
 from typing import Any, Dict, Optional, TypedDict
 

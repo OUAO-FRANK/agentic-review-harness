@@ -3,7 +3,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 
-from ..diff_parser import ParsedDiff, iter_diff_lines
+from ..diff_parser import ParsedDiff, file_header_path, iter_diff_lines
 from ..gates import FindingGate, GateResult
 from ..models import Finding
 from .context import ContextBuilder
@@ -31,11 +31,9 @@ def _file_patches(diff: str) -> dict[str, str]:
         elif kind == "old-file":
             old_header, current = line, None
         elif kind == "new-file":
-            path = line[4:].strip().split("\t", 1)[0]
+            path = file_header_path(line)
             if path == "/dev/null":
-                path = old_header[4:].strip().split("\t", 1)[0]
-            if path.startswith(("a/", "b/")):
-                path = path[2:]
+                path = file_header_path(old_header)
             current = sections[path]
             current.extend((old_header + "\n", line + "\n"))
             old_header = ""

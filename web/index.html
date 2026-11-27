@@ -4,17 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b0d10">
-  <title>Agentic Review Harness · 智能代码审查控制台</title>
-  <meta name="description" content="Agentic Review Harness 多智能体代码审查、自动修复与 Skill 演进控制台">
-  <link rel="stylesheet" href="/assets/app.css?v=20260805.5">
+  <title>DiffLedger · PR 审查控制台</title>
+  <meta name="description" content="使用 DiffLedger 提交 PR 变更、核对审查证据并跟踪修复。">
+  <link rel="stylesheet" href="/assets/app.css?v=diffledger-1">
   <link rel="stylesheet" href="/assets/login.css?v=20260805">
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar" aria-label="主导航">
-      <a class="brand" href="#overview" aria-label="Agentic Review Harness 首页">
-        <span class="brand-mark" aria-hidden="true">E</span>
-        <span class="brand-copy">Agentic Review Harness<small>REVIEW CONTROL</small></span>
+      <a class="brand" href="#overview" aria-label="DiffLedger 首页">
+        <span class="brand-mark" aria-hidden="true">D</span>
+        <span class="brand-copy">DiffLedger</span>
       </a>
 
       <nav class="nav-list">
@@ -47,15 +47,15 @@
         <div class="top-actions">
           <button class="refresh-button" id="refresh" aria-label="刷新当前数据">刷新</button>
           <button class="button secondary hidden" id="logout">退出登录</button>
-          <span class="avatar" aria-label="当前用户">EA</span>
+
         </div>
       </header>
 
       <section class="view active" id="view-overview" aria-labelledby="page-title">
         <div class="hero">
           <div class="hero-copy">
-            <h2>让每一次代码审查，<br><em>都成为系统的经验。</em></h2>
-            <p>Lead 主 Agent 动态委派安全、可靠性与 Critic 从 Agent。Harness 统一管理状态、预算、恢复与版本门禁。</p>
+            <h2>PR 证据审查</h2>
+            <p>提交代码变更，查看每条发现对应的文件、行号和代码证据。</p>
             <div class="hero-actions">
               <button class="button accent" data-jump="review">新建 PR 审查</button>
               <button class="text-button" data-jump="tasks">查看任务记录</button>
@@ -64,7 +64,7 @@
           <div class="hero-visual" aria-hidden="true">
             <div class="orbit orbit-one"></div>
             <div class="orbit orbit-two"></div>
-            <div class="core"><span>E</span><small>HARNESS</small></div>
+            <div class="core"><span>D</span><small>LEDGER</small></div>
             <span class="node node-a">SEC</span>
             <span class="node node-b">REL</span>
             <span class="node node-c">LLM</span>
@@ -104,7 +104,7 @@
 
       <section class="view" id="view-review" aria-labelledby="page-title">
         <div class="section-heading">
-          <div><h2>提交 Pull Request Diff</h2><p>选择规则、单模型或真实多模型模式，报告会披露实际调用成本。</p></div>
+          <div><h2>提交 Pull Request Diff</h2><p>粘贴 unified diff 后提交审查。服务会使用已配置的模型调查变更，并将结果保存在任务报告中。</p></div>
         </div>
         <div class="form-layout">
           <article class="panel form-panel">
@@ -119,7 +119,7 @@
               </div>
               <label>运行模式
                 <select name="mode" id="review-mode">
-                  <option value="agentic">agentic · 四个真实 LLM 角色</option>
+                  <option value="agentic">agentic · 多角色审查</option>
                 </select>
               </label>
               <label class="diff-field"><span class="field-label">Unified Diff <span class="field-meta" id="diff-stats" aria-live="polite">0 行，0 字符</span></span>
@@ -160,7 +160,12 @@
               <h3>任务报告</h3>
               <button class="button danger hidden" id="create-fix">创建修复分支</button>
             </div>
-            <pre id="task-report">请选择一个已完成的任务。</pre>
+            <p id="report-status" role="status">请选择一个任务。</p>
+            <ol id="report-findings" aria-label="审查发现"></ol>
+            <details id="report-raw" class="hidden">
+              <summary>查看任务 JSON</summary>
+              <pre id="task-report"></pre>
+            </details>
             <section class="feedback-panel hidden" id="feedback-panel" aria-labelledby="feedback-title">
               <div class="feedback-head">
                 <div>
@@ -265,8 +270,8 @@
   <div class="login-overlay hidden" id="login-overlay">
     <form class="login-card" id="login-form">
       <div class="login-brand">
-        <span class="brand-mark">E</span>
-        <span>Agentic Review Harness<small>SECURE CONTROL PLANE</small></span>
+        <span class="brand-mark" aria-hidden="true">D</span>
+        <span>DiffLedger</span>
       </div>
       <h2>登录控制台</h2>
       <p class="login-lead">使用你的工作区凭据继续。</p>
@@ -279,6 +284,6 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/assets/app.js?v=20260805.6"></script>
+  <script src="/assets/app.js?v=diffledger-1"></script>
 </body>
 </html>

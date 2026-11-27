@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, Optional
 
 
+from diffledger.resources import resource_directory
+
+
 _DOTENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -92,7 +95,7 @@ class Settings:
     deepseek_api_key: str = ""
     openrouter_api_key: str = ""
     openrouter_site_url: str = ""
-    openrouter_app_name: str = "Agentic Review Harness"
+    openrouter_app_name: str = "DiffLedger"
     eval_max_cases: int = 5
     eval_min_cases: int = 3
     eval_min_improvement: float = 0.01
@@ -110,7 +113,7 @@ class Settings:
     repair_test_command: str = ""
     repair_verify_timeout_seconds: int = 120
     otel_endpoint: str = ""
-    otel_service_name: str = "agentic-review-harness"
+    otel_service_name: str = "diffledger"
     alert_failure_rate: float = 0.20
     alert_min_samples: int = 10
     alert_window_seconds: int = 900
@@ -248,7 +251,7 @@ class Settings:
             memory_working_ttl_seconds=_int(
                 "EVOAGENT_MEMORY_WORKING_TTL_SECONDS", 86400
             ),
-            skills_dir=os.getenv("EVOAGENT_SKILLS_DIR", "skills"),
+            skills_dir=os.getenv("EVOAGENT_SKILLS_DIR", "skills" if os.path.isdir("skills") else str(resource_directory("skills"))),
             github_app_id=os.getenv("EVOAGENT_GITHUB_APP_ID", ""),
             github_app_slug=os.getenv("EVOAGENT_GITHUB_APP_SLUG", ""),
             github_private_key_path=os.getenv("EVOAGENT_GITHUB_PRIVATE_KEY_PATH", ""),
@@ -257,7 +260,7 @@ class Settings:
             deepseek_api_key=os.getenv("EVOAGENT_DEEPSEEK_API_KEY", ""),
             openrouter_api_key=os.getenv("EVOAGENT_OPENROUTER_API_KEY", ""),
             openrouter_site_url=os.getenv("EVOAGENT_OPENROUTER_SITE_URL", ""),
-            openrouter_app_name=os.getenv("EVOAGENT_OPENROUTER_APP_NAME", "Agentic Review Harness"),
+            openrouter_app_name=os.getenv("EVOAGENT_OPENROUTER_APP_NAME", "DiffLedger"),
             eval_max_cases=_int("EVOAGENT_EVAL_MAX_CASES", 5),
             eval_min_cases=_int("EVOAGENT_EVAL_MIN_CASES", 3),
             eval_min_improvement=float(os.getenv("EVOAGENT_EVAL_MIN_IMPROVEMENT", "0.01")),
@@ -277,7 +280,7 @@ class Settings:
             repair_test_command=os.getenv("EVOAGENT_REPAIR_TEST_COMMAND", ""),
             repair_verify_timeout_seconds=_int("EVOAGENT_REPAIR_VERIFY_TIMEOUT_SECONDS", 120),
             otel_endpoint=os.getenv("EVOAGENT_OTEL_ENDPOINT", ""),
-            otel_service_name=os.getenv("EVOAGENT_OTEL_SERVICE_NAME", "agentic-review-harness"),
+            otel_service_name=os.getenv("EVOAGENT_OTEL_SERVICE_NAME", "diffledger"),
             alert_failure_rate=float(os.getenv("EVOAGENT_ALERT_FAILURE_RATE", "0.20")),
             alert_min_samples=_int("EVOAGENT_ALERT_MIN_SAMPLES", 10),
             alert_window_seconds=_int("EVOAGENT_ALERT_WINDOW_SECONDS", 900),

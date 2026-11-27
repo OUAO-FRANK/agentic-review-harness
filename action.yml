@@ -1,5 +1,5 @@
-name: Agentic Review Harness
-description: Review a unified diff and produce a structured report.
+name: DiffLedger
+description: Review added lines in a unified diff and upload the findings as JSON.
 author: OUAO-FRANK
 
 inputs:
@@ -16,7 +16,7 @@ inputs:
     required: false
     default: agentic-review.json
   python-version:
-    description: Python version used to run Agentic Review Harness.
+    description: Python version used to run DiffLedger.
     required: false
     default: "3.11"
 
@@ -48,7 +48,7 @@ runs:
       uses: actions/setup-python@v7
       with:
         python-version: ${{ inputs.python-version }}
-    - name: Install Agentic Review Harness
+    - name: Install DiffLedger
       shell: bash
       run: python -m pip install "$GITHUB_ACTION_PATH"
     - name: Run review

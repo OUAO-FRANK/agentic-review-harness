@@ -591,6 +591,21 @@ textarea { min-height: 150px; resize: vertical; font: 11px/1.7 "Cascadia Code", 
   font: 10px/1.75 "Cascadia Code", Consolas, monospace;
   font-variant-numeric: tabular-nums;
 }
+#report-findings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+#report-findings li {
+  display: grid;
+  gap: .5rem;
+  margin: 1rem 0;
+  padding-left: .85rem;
+  border-left: 2px solid var(--accent);
+}
+#report-findings code { overflow-wrap: anywhere; }
+#report-findings pre { min-height: 0; max-height: 12em; margin: 0; }
+#report-raw summary { cursor: pointer; margin: .75rem 0; }
 .feedback-panel {
   margin-top: 16px;
   padding: 20px;

@@ -158,11 +158,11 @@ class SafeFixer:
             }
         commit = client.create_atomic_commit(
             repository, branch, source_sha, files,
-            "fix: apply verified Agentic Review Harness repairs for PR #%d" % pull_request,
+            "fix: apply verified DiffLedger repairs for PR #%d" % pull_request,
         )
         draft = client.create_draft_pull_request(
             repository,
-            "fix: verified Agentic Review Harness repairs for #%d" % pull_request,
+            "fix: verified DiffLedger repairs for #%d" % pull_request,
             branch, pull.get("base", {}).get("ref", "main"),
             "Automated deterministic repair. All configured compile and test gates passed.",
         )

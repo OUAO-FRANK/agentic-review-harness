@@ -7,7 +7,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from evoagent.evolution_proof import (  # noqa: E402
+from diffledger.evaluation.replay import (  # noqa: E402
     DEFAULT_PROMPT_DATASET,
     run_prompt_evolution_proof,
     write_report,
